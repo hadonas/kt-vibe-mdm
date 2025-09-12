@@ -1,0 +1,113 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: mdm-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-mdm}
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - mdm-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: mdm-backend
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      # MongoDB 설정
+      MONGO_URI: ${MONGO_URI:-mongodb://admin:password@mongodb:27017/mdm?authSource=admin}
+      MONGO_DB: ${MONGO_DB:-mdm}
+      MONGO_HOST: ${MONGO_HOST:-mongodb}
+      MONGO_PORT: ${MONGO_PORT:-27017}
+      MONGO_USERNAME: ${MONGO_USERNAME:-admin}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:-password}
+      MONGO_AUTH_DB: ${MONGO_AUTH_DB:-admin}
+      
+      # JWT 인증 설정
+      JWT_SECRET: ${JWT_SECRET:-change-this-to-a-strong-random-secret-key-for-production}
+      JWT_ISSUER: ${JWT_ISSUER:-mdm.local}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      
+      # 관리자 계정
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@company.com}
+      
+      # Vector Search 설정
+      ATLAS_VECTOR_INDEX_PURPOSE: ${ATLAS_VECTOR_INDEX_PURPOSE:-purpose_idx}
+      SIM_THRESHOLD: ${SIM_THRESHOLD:-0.82}
+      TOPK_DEFAULT: ${TOPK_DEFAULT:-5}
+      
+      # 파일 처리 설정
+      TMP_DIR: ${TMP_DIR:-/tmp/mdm}
+      EXCLUDE_GLOBS: ${EXCLUDE_GLOBS:-node_modules/**,dist/**,build/**,*.bin,*.zip,*.jar}
+      MAX_ARCHIVE_SIZE_MB: ${MAX_ARCHIVE_SIZE_MB:-50}
+      FILE_STORAGE_TYPE: ${FILE_STORAGE_TYPE:-gridfs}
+      
+      # AI 서비스 설정
+      EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-http://localhost:11434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embed-3}
+      LLM_API_BASE: ${LLM_API_BASE:-http://localhost:11434}
+      LLM_MODEL: ${LLM_MODEL:-llama3.2}
+      AI_API_KEY: ${AI_API_KEY:-}
+      
+      # 이메일 설정
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@company.com}
+      
+      # 시스템 설정
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      
+      # CORS 설정 (프론트엔드 연결용)
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+    depends_on:
+      - mongodb
+    networks:
+      - mdm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend2
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080/api}
+    container_name: mdm-frontend2
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080/api}
+    depends_on:
+      - backend
+    networks:
+      - mdm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:
+
+networks:
+  mdm-network:
+    driver: bridge
