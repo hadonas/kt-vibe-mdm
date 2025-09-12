@@ -9,6 +9,7 @@ import com.company.app.common.dto.Serial;
 import com.company.app.common.dto.Category;
 import com.company.app.common.dto.Source;
 import com.company.app.file.service.LocalFileStorageService;
+import com.company.app.file.service.FileAnalysisService;
 import com.company.app.ingest.service.RepositoryAnalysisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +33,7 @@ public class ApprovalService {
     private final IngestRequestRepository ingestRequestRepository;
     private final DocumentRepository documentRepository;
     private final LocalFileStorageService localFileStorageService;
+    private final FileAnalysisService fileAnalysisService;
     private final RepositoryAnalysisService repositoryAnalysisService;
     
     public Page<IngestRequest> getApprovalRequests(int page, int size, String status) {
@@ -93,13 +97,18 @@ public class ApprovalService {
             
             // 2. 벡터 DB에 저장 (승인 시에만)
             DocumentEntity savedDocument = documentRepository.save(document);
-            log.info("문서가 벡터 DB에 저장됨: {}", savedDocument.getId());
             
-            // 3. 임시 파일을 최종 저장소로 이동
+            // 3. 샤드 ID 설정 (문서 ID가 생성된 후)
+            savedDocument.setShardId(calculateShardId(savedDocument.getId()));
+            savedDocument = documentRepository.save(savedDocument);
+            
+            log.info("문서가 벡터 DB에 저장됨: {}, 샤드 ID: {}", savedDocument.getId(), savedDocument.getShardId());
+            
+            // 4. 임시 파일을 최종 저장소로 이동
             String savedFilePath = moveTempFileToFinal(request, savedDocument);
             log.info("문서가 최종 저장소에 저장됨: {}", savedFilePath);
             
-            // 4. 처리 완료 상태로 변경
+            // 5. 처리 완료 상태로 변경
             request.setStatus(IngestRequest.Status.COMPLETED);
             request.setProcessedAt(LocalDateTime.now());
             
@@ -216,13 +225,41 @@ public class ApprovalService {
         document.setOwnerId(request.getOwnerId());
         document.setSerial(serial);
         document.setCategory(category);
-        document.setPurpose(request.getProposedPurpose() != null ? request.getProposedPurpose() : "제목 없음");
-        document.setContent(request.getExtractedText());
+        document.setPurpose(request.getProposedTitle() != null ? request.getProposedTitle() : 
+                           (request.getProposedPurpose() != null ? request.getProposedPurpose() : "제목 없음"));
+        
+        // DOCX/XLSX 파일의 경우 FileAnalysisService를 통해 내용 추출
+        String content = request.getExtractedText();
+        if (content == null && request.getSource().getType() == Source.SourceType.PLAN && 
+            request.getSource().getFiles() != null && !request.getSource().getFiles().isEmpty()) {
+            try {
+                String fileId = request.getSource().getFiles().get(0);
+                // 임시 파일에서 내용 추출 (이미 FileAnalysisService에서 처리된 내용)
+                // 실제로는 IngestRequest에 extractedText가 저장되어야 함
+                content = "DOCX 파일 내용이 추출되지 않았습니다. 파일 분석을 다시 수행해주세요.";
+            } catch (Exception e) {
+                log.warn("파일 내용 추출 실패: {}", e.getMessage());
+                content = "파일 내용을 추출할 수 없습니다.";
+            }
+        }
+        document.setContent(content);
         document.setSource(source);
         document.setTags(request.getTags());
         document.setRequestedAt(request.getRequestedAt());
         document.setApprovedAt(LocalDateTime.now()); // 승인 시점을 현재 시간으로 설정
         document.setVersion(1);
+        
+        // 원본 파일명 설정 (파일 기반 등록인 경우)
+        if (request.getSource().getType() == Source.SourceType.PLAN) {
+            // IngestRequest에 저장된 원본 파일명 사용
+            if (request.getOriginalFileName() != null && !request.getOriginalFileName().isEmpty()) {
+                document.setOriginalFileName(request.getOriginalFileName());
+            } else if (request.getSource().getFiles() != null && !request.getSource().getFiles().isEmpty()) {
+                // 원본 파일명이 없으면 첫 번째 파일 ID를 사용
+                String firstFileName = request.getSource().getFiles().get(0);
+                document.setOriginalFileName(firstFileName);
+            }
+        }
         
         // 벡터 임베딩은 나중에 별도 서비스에서 처리
         // document.setVectors(createVectorEmbeddings(request));
@@ -254,6 +291,25 @@ public class ApprovalService {
         } catch (Exception e) {
             log.error("반려 요청 처리 중 오류 발생: {}", e.getMessage(), e);
             throw new RuntimeException("반려 요청 처리 중 오류가 발생했습니다.", e);
+        }
+    }
+    
+    /**
+     * 문서 ID를 기반으로 샤드 ID 계산
+     * @param documentId 문서 ID
+     * @return 샤드 ID (0-7 범위)
+     */
+    private Integer calculateShardId(String documentId) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] hash = md.digest(documentId.getBytes());
+            
+            // 해시값의 첫 번째 바이트를 사용하여 0-7 범위의 샤드 ID 생성
+            int shardId = Math.abs(hash[0]) % 8;
+            return shardId;
+        } catch (NoSuchAlgorithmException e) {
+            log.warn("MD5 해시 계산 실패, 기본 샤드 ID 사용: {}", e.getMessage());
+            return 0; // 기본값
         }
     }
 }

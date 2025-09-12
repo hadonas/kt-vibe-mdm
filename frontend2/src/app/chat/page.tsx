@@ -45,7 +45,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const downloadFile = async (docId: string, fileName: string) => {
+  const downloadFile = async (fileName: string) => {
     try {
       const token = localStorage.getItem('accessToken')
       if (!token) {
@@ -53,7 +53,11 @@ export default function ChatPage() {
         return
       }
 
-      const response = await fetch(`/api/admin/files/download?filePath=${encodeURIComponent(`/app/storage/A_소프트웨어/A01_웹개발/A0101_프론트엔드/${fileName}`)}`, {
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'
+      // 파일명에서 코드를 추출하여 코드 기반 다운로드 API 사용
+      // fileName이 "A0102-2288.md" 형태이므로 확장자를 제거
+      const code = fileName.replace(/\.[^/.]+$/, '') // A0102-2288 같은 코드 추출
+      const response = await fetch(`${apiBaseUrl}/admin/files/download-by-code?code=${encodeURIComponent(code)}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -284,7 +288,7 @@ export default function ChatPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => downloadFile(source.docId, `${source.serial}.md`)}
+                                onClick={() => downloadFile(`${source.serial}.md`)}
                                 className="h-6 px-2 text-xs"
                               >
                                 <ArrowDownTrayIcon className="h-3 w-3 mr-1" />

@@ -17,6 +17,8 @@ public interface DocumentRepository extends MongoRepository<DocumentEntity, Stri
     
     List<DocumentEntity> findByOwnerId(String ownerId);
     
+    Page<DocumentEntity> findByOwnerId(String ownerId, Pageable pageable);
+    
     @Query("{'acl.ownerId': ?0}")
     List<DocumentEntity> findByOwnerIdOrShared(String ownerId);
     

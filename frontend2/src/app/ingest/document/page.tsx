@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import FileUpload from '@/components/ui/FileUpload'
 import api from '@/lib/api'
-import { PresignRequest, SingleIngestRequest } from '@/types/api'
+import { PresignRequest, SingleIngestRequest, Category } from '@/types/api'
 import { mockApi } from '@/lib/mock-api'
 import { isApiImplemented } from '@/lib/api-status'
 
@@ -16,10 +16,80 @@ export default function DocumentIngestPage() {
   const [purpose, setPurpose] = useState('')
   const [tags, setTags] = useState('')
   const [isUploading, setIsUploading] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({})
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [analysisResult, setAnalysisResult] = useState<{
+    proposedCategory?: Category
+    proposedPurpose?: string
+    proposedTitle?: string
+  } | null>(null)
+  const [uploadedFileId, setUploadedFileId] = useState<string | null>(null)
   const router = useRouter()
+
+  const analyzeFile = async (file: File) => {
+    try {
+      setIsAnalyzing(true)
+      setError('')
+
+      // 1. 파일 업로드
+      const uploadFormData = new FormData()
+      uploadFormData.append('file', file)
+
+      const uploadResponse = await api.post('/files/upload', uploadFormData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      })
+
+      const uploadResult = uploadResponse.data
+      const fileId = uploadResult.fileId
+
+      // 2. 파일 분석
+      const analyzeFormData = new FormData()
+      analyzeFormData.append('file', file)
+
+      const analyzeResponse = await api.post('/files/analyze', analyzeFormData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      })
+
+      const result = analyzeResponse.data
+      setAnalysisResult({
+        proposedCategory: result.proposedCategory,
+        proposedPurpose: result.proposedPurpose,
+        proposedTitle: result.proposedTitle
+      })
+      
+      // 분석 결과를 폼에 자동으로 채우기
+      if (result.proposedPurpose) {
+        setPurpose(result.proposedPurpose)
+      }
+      
+      // 제목은 원본 파일명을 사용하도록 설정 (확장자 제거)
+      if (result.proposedTitle) {
+        const titleWithoutExtension = result.proposedTitle.replace(/\.[^/.]+$/, "")
+        setAnalysisResult(prev => ({
+          ...prev,
+          proposedTitle: titleWithoutExtension
+        }))
+      }
+
+      // 업로드된 파일 ID 저장
+      setUploadedFileId(fileId)
+      
+    } catch (error: unknown) {
+      console.error('파일 분석 실패:', error)
+      const errorMessage = error instanceof Error && 'response' in error 
+        ? (error as any).response?.data?.error 
+        : '파일 분석에 실패했습니다.'
+      setError(errorMessage)
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
 
   const uploadFile = async (file: File): Promise<string> => {
     try {
@@ -102,9 +172,12 @@ export default function DocumentIngestPage() {
 
       // 등록 요청 생성
       const ingestRequest: SingleIngestRequest = {
-        fileIds,
+        fileIds: uploadedFileId ? [uploadedFileId] : fileIds,
         purpose: purpose.trim() || undefined,
-        tags: tags.trim() ? tags.split(',').map(tag => tag.trim()) : undefined
+        tags: tags.trim() ? tags.split(',').map(tag => tag.trim()) : undefined,
+        proposedCategory: analysisResult?.proposedCategory,
+        proposedTitle: analysisResult?.proposedTitle,
+        originalFileName: files.length > 0 ? files[0].name : undefined
       }
 
       await api.post('/ingest/single', ingestRequest)
@@ -127,9 +200,15 @@ export default function DocumentIngestPage() {
     }
   }
 
-  const handleFilesChange = (newFiles: File[]) => {
+  const handleFilesChange = async (newFiles: File[]) => {
     setFiles(newFiles)
     setError('')
+    setAnalysisResult(null)
+    
+    // 첫 번째 파일이 있으면 자동으로 분석
+    if (newFiles.length > 0) {
+      await analyzeFile(newFiles[0])
+    }
   }
 
   return (
@@ -162,6 +241,44 @@ export default function DocumentIngestPage() {
                 maxSize={50 * 1024 * 1024} // 50MB
               />
             </div>
+
+            {/* 파일 분석 결과 */}
+            {isAnalyzing && (
+              <div className="bg-blue-50 border border-blue-200 text-blue-600 px-4 py-3 rounded-md text-sm">
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                  AI가 파일을 분석하고 있습니다...
+                </div>
+              </div>
+            )}
+
+            {analysisResult && (
+              <div className="bg-green-50 border border-green-200 rounded-md p-4">
+                <h4 className="font-medium text-green-800 mb-3">AI 분석 결과</h4>
+                <div className="space-y-2 text-sm">
+                  {analysisResult.proposedTitle && (
+                    <div>
+                      <span className="font-medium text-green-700">제안된 제목:</span>
+                      <span className="ml-2 text-green-600">{analysisResult.proposedTitle}</span>
+                    </div>
+                  )}
+                  {analysisResult.proposedCategory && (
+                    <div>
+                      <span className="font-medium text-green-700">제안된 카테고리:</span>
+                      <span className="ml-2 text-green-600">
+                        {analysisResult.proposedCategory.majorName} &gt; {analysisResult.proposedCategory.midName} &gt; {analysisResult.proposedCategory.subName}
+                      </span>
+                    </div>
+                  )}
+                  {analysisResult.proposedPurpose && (
+                    <div>
+                      <span className="font-medium text-green-700">제안된 목적:</span>
+                      <span className="ml-2 text-green-600">{analysisResult.proposedPurpose}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 목적 */}
             <div>

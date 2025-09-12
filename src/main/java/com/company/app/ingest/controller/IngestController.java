@@ -53,21 +53,6 @@ public class IngestController {
         }
     }
     
-    @PostMapping("/bulk")
-    @Operation(summary = "벌크 등록")
-    public ResponseEntity<?> bulkIngest(@RequestParam("file") MultipartFile file,
-                                      @RequestParam("type") String type,
-                                      Authentication authentication) {
-        String userId = authentication.getName();
-        
-        try {
-            var response = ingestService.processBulkIngest(userId, file, type);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", e.getMessage()));
-        }
-    }
     
     @PostMapping("/{id}/resubmit")
     @Operation(summary = "재등록/수정 (버전업)")

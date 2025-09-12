@@ -82,6 +82,7 @@ public class RepositoryAnalysisService {
             RepositoryAnalysisResult result = RepositoryAnalysisResult.builder()
                 .extractedText(buildExtractedText(codeAnalysis, readmeContent, projectConfig, aiAnalysis))
                 .proposedCategory(determineCategory(codeAnalysis, projectConfig))
+                .proposedTitle(aiAnalysis.getTitle())
                 .proposedPurpose(aiAnalysis.getPurpose())
                 .expectedEffects(aiAnalysis.getExpectedEffects())
                 .techStack(projectConfig.getTechStack())
@@ -746,6 +747,7 @@ public class RepositoryAnalysisService {
         prompt.append("응답 형식:\n");
         prompt.append("```json\n");
         prompt.append("{\n");
+        prompt.append("  \"title\": \"프로젝트의 간결하고 명확한 제목 (50자 이내)\",\n");
         prompt.append("  \"purpose\": \"프로젝트의 구체적인 목적 설명\",\n");
         prompt.append("  \"expectedEffects\": \"기대 효과 1\\n기대 효과 2\\n기대 효과 3\",\n");
         prompt.append("  \"architecture\": \"아키텍처 설명\",\n");
@@ -865,6 +867,7 @@ public class RepositoryAnalysisService {
     public static class RepositoryAnalysisResult {
         private String extractedText;
         private Category proposedCategory;
+        private String proposedTitle;
         private String proposedPurpose;
         private String expectedEffects;
         private Set<String> techStack;
@@ -904,6 +907,7 @@ public class RepositoryAnalysisService {
     @lombok.Data
     @lombok.Builder
     public static class AIAnalysisResult {
+        private String title;
         private String purpose;
         private String expectedEffects;
         private double confidence;
@@ -1103,14 +1107,15 @@ public class RepositoryAnalysisService {
             // Jackson ObjectMapper를 사용하여 JSON 파싱
             JsonNode rootNode = objectMapper.readTree(content);
             
+            String title = getJsonField(rootNode, "title");
             String purpose = getJsonField(rootNode, "purpose");
             String expectedEffects = getJsonField(rootNode, "expectedEffects");
             String architecture = getJsonField(rootNode, "architecture");
             String techStack = getJsonField(rootNode, "techStack");
             String codeQuality = getJsonField(rootNode, "codeQuality");
             
-            log.info("Parsed AI response - purpose: {}, expectedEffects: {}, architecture: {}, techStack: {}, codeQuality: {}", 
-                    purpose, expectedEffects, architecture, techStack, codeQuality);
+            log.info("Parsed AI response - title: {}, purpose: {}, expectedEffects: {}, architecture: {}, techStack: {}, codeQuality: {}", 
+                    title, purpose, expectedEffects, architecture, techStack, codeQuality);
             
             // 추가 정보를 purpose에 통합
             StringBuilder enhancedPurpose = new StringBuilder();
@@ -1128,6 +1133,7 @@ public class RepositoryAnalysisService {
             }
             
             return AIAnalysisResult.builder()
+                .title(title != null && !title.trim().isEmpty() ? title : "프로젝트")
                 .purpose(enhancedPurpose.length() > 0 ? enhancedPurpose.toString() : "프로젝트 목적을 분석할 수 없습니다.")
                 .expectedEffects(expectedEffects != null && !expectedEffects.trim().isEmpty() ? expectedEffects : "기대 효과를 분석할 수 없습니다.")
                 .confidence(0.90)
@@ -1177,38 +1183,58 @@ public class RepositoryAnalysisService {
     }
     
     private AIAnalysisResult parseTextResponse(String content) {
-        // 텍스트 응답을 파싱하여 목적과 효과 추출
+        // 텍스트 응답을 파싱하여 제목, 목적과 효과 추출
+        String title = "프로젝트";
         String purpose = "프로젝트 목적을 분석할 수 없습니다.";
         String expectedEffects = "기대 효과를 분석할 수 없습니다.";
         
         // 간단한 텍스트 파싱 로직
         String[] lines = content.split("\n");
+        StringBuilder titleBuilder = new StringBuilder();
         StringBuilder purposeBuilder = new StringBuilder();
         StringBuilder effectsBuilder = new StringBuilder();
         
+        boolean inTitle = false;
         boolean inPurpose = false;
         boolean inEffects = false;
         
         for (String line : lines) {
             String trimmed = line.trim();
+            if (trimmed.toLowerCase().contains("제목") || trimmed.toLowerCase().contains("title")) {
+                inTitle = true;
+                inPurpose = false;
+                inEffects = false;
+                continue;
+            }
             if (trimmed.toLowerCase().contains("목적") || trimmed.toLowerCase().contains("purpose")) {
+                inTitle = false;
                 inPurpose = true;
                 inEffects = false;
                 continue;
             }
             if (trimmed.toLowerCase().contains("효과") || trimmed.toLowerCase().contains("effect")) {
+                inTitle = false;
                 inPurpose = false;
                 inEffects = true;
                 continue;
             }
             
-            if (inPurpose && !trimmed.isEmpty()) {
+            if (inTitle && !trimmed.isEmpty()) {
+                titleBuilder.append(trimmed).append(" ");
+            } else if (inPurpose && !trimmed.isEmpty()) {
                 purposeBuilder.append(trimmed).append("\n");
             } else if (inEffects && !trimmed.isEmpty()) {
                 effectsBuilder.append(trimmed).append("\n");
             }
         }
         
+        if (titleBuilder.length() > 0) {
+            title = titleBuilder.toString().trim();
+            // 제목이 너무 길면 잘라내기
+            if (title.length() > 50) {
+                title = title.substring(0, 47) + "...";
+            }
+        }
         if (purposeBuilder.length() > 0) {
             purpose = purposeBuilder.toString().trim();
         }
@@ -1217,6 +1243,7 @@ public class RepositoryAnalysisService {
         }
         
         return AIAnalysisResult.builder()
+            .title(title)
             .purpose(purpose)
             .expectedEffects(expectedEffects)
             .confidence(0.80)

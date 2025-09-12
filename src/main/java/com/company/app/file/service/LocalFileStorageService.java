@@ -1,5 +1,7 @@
 package com.company.app.file.service;
 
+import com.company.app.catalog.entity.CatalogNode;
+import com.company.app.catalog.repository.CatalogNodeRepository;
 import com.company.app.common.dto.Category;
 import com.company.app.document.entity.DocumentEntity;
 import lombok.RequiredArgsConstructor;
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -35,6 +38,9 @@ public class LocalFileStorageService {
     @Value("${app.file.temp.path:/app/temp}")
     private String tempBasePath;
     
+    private final FileAnalysisService fileAnalysisService;
+    private final CatalogNodeRepository catalogNodeRepository;
+    
     public String getStoragePath() {
         return storageBasePath;
     }
@@ -58,23 +64,101 @@ public class LocalFileStorageService {
             // 2. 디렉토리 생성
             Files.createDirectories(documentPath);
             
-            // 3. 파일명 생성 (코드번호_제목.md)
-            String fileName = generateFileName(document);
-            Path filePath = documentPath.resolve(fileName);
-            
-            // 4. 파일 내용 생성
-            String content = generateFileContent(document);
-            
-            // 5. 파일 저장
-            Files.write(filePath, content.getBytes("UTF-8"), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-            
-            log.info("문서 로컬 저장 완료: {}", filePath);
-            return filePath.toString();
+            // 3. 파일 타입에 따른 저장 방식 결정
+            if (isOriginalFileDocument(document)) {
+                // 원본 파일 저장 (DOCX, XLSX 등)
+                return saveOriginalFile(document, documentPath);
+            } else {
+                // MD 파일 생성 (GitHub 레포지토리 분석 결과 등)
+                return saveMarkdownFile(document, documentPath);
+            }
             
         } catch (Exception e) {
             log.error("문서 로컬 저장 중 오류 발생: {}", e.getMessage(), e);
             throw new RuntimeException("문서 저장에 실패했습니다: " + e.getMessage(), e);
         }
+    }
+    
+    /**
+     * 원본 파일 문서인지 확인 (DOCX, XLSX 등)
+     */
+    private boolean isOriginalFileDocument(DocumentEntity document) {
+        return document.getSource() != null && 
+               document.getSource().getType() == com.company.app.common.dto.Source.SourceType.PLAN &&
+               document.getOriginalFileName() != null &&
+               (document.getOriginalFileName().toLowerCase().endsWith(".docx") ||
+                document.getOriginalFileName().toLowerCase().endsWith(".xlsx") ||
+                document.getOriginalFileName().toLowerCase().endsWith(".pdf"));
+    }
+    
+    /**
+     * 원본 파일 저장 (DOCX, XLSX, PDF 등)
+     */
+    private String saveOriginalFile(DocumentEntity document, Path documentPath) throws IOException {
+        // 원본 파일명에서 확장자 추출
+        String originalFileName = document.getOriginalFileName();
+        String extension = "";
+        int lastDotIndex = originalFileName.lastIndexOf('.');
+        if (lastDotIndex != -1) {
+            extension = originalFileName.substring(lastDotIndex);
+        }
+        
+        // 파일명 생성: (코드)_(제목).(원본확장자)
+        String serial = document.getSerial().getFull();
+        String title = sanitizeFileName(document.getPurpose());
+        if (title.length() > 100) {
+            title = title.substring(0, 97) + "...";
+        }
+        title = title.replaceAll("_+$", "");
+        if (title.isEmpty()) {
+            title = "document";
+        }
+        
+        String fileName = String.format("%s_%s%s", serial, title, extension);
+        Path filePath = documentPath.resolve(fileName);
+        
+        // 원본 파일을 임시 저장소에서 복사
+        if (document.getSource() != null && document.getSource().getFiles() != null && !document.getSource().getFiles().isEmpty()) {
+            String fileId = document.getSource().getFiles().get(0);
+            try {
+                // FileAnalysisService에서 원본 바이너리 파일을 가져와서 저장
+                byte[] fileContent = fileAnalysisService.getTemporaryFile(fileId);
+                Files.write(filePath, fileContent, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                
+                // 임시 파일 삭제
+                fileAnalysisService.deleteTemporaryFile(fileId);
+            } catch (Exception e) {
+                log.warn("원본 파일 복사 실패, 텍스트 내용으로 저장: {}", e.getMessage());
+                // 원본 파일 복사 실패 시 텍스트 내용 저장
+                String content = document.getContent();
+                Files.write(filePath, content.getBytes("UTF-8"), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            }
+        } else {
+            // 파일 ID가 없는 경우 텍스트 내용 저장
+            String content = document.getContent();
+            Files.write(filePath, content.getBytes("UTF-8"), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        }
+        
+        log.info("원본 파일 로컬 저장 완료: {}", filePath);
+        return filePath.toString();
+    }
+    
+    /**
+     * 마크다운 파일 저장 (GitHub 레포지토리 분석 결과 등)
+     */
+    private String saveMarkdownFile(DocumentEntity document, Path documentPath) throws IOException {
+        // 파일명 생성 (코드번호_제목.md)
+        String fileName = generateFileName(document);
+        Path filePath = documentPath.resolve(fileName);
+        
+        // 파일 내용 생성
+        String content = generateFileContent(document);
+        
+        // 파일 저장
+        Files.write(filePath, content.getBytes("UTF-8"), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        
+        log.info("마크다운 파일 로컬 저장 완료: {}", filePath);
+        return filePath.toString();
     }
     
     /**
@@ -127,39 +211,72 @@ public class LocalFileStorageService {
     }
     
     /**
-     * 일반 문서 파일명 생성
+     * 일반 문서 파일명 생성 - (코드)_(원본파일명).(파일형식) 형태
      */
     private String generateFileName(DocumentEntity document) {
         String serial = document.getSerial().getFull();
-        String purpose = sanitizeFileName(document.getPurpose());
         
-        // purpose가 비어있으면 기본값 사용
-        if (purpose.isEmpty()) {
-            purpose = "document";
+        // 원본 파일명이 있으면 사용, 없으면 purpose 사용
+        String fileName;
+        if (document.getOriginalFileName() != null && !document.getOriginalFileName().isEmpty()) {
+            // 원본 파일명에서 확장자 제거
+            String originalName = document.getOriginalFileName();
+            int lastDotIndex = originalName.lastIndexOf('.');
+            if (lastDotIndex != -1) {
+                fileName = originalName.substring(0, lastDotIndex);
+            } else {
+                fileName = originalName;
+            }
+        } else {
+            // 원본 파일명이 없으면 purpose 사용
+            fileName = sanitizeFileName(document.getPurpose());
+            if (fileName.isEmpty()) {
+                fileName = "document";
+            }
         }
         
-        // 제목이 너무 길면 잘라내기
-        if (purpose.length() > 50) {
-            purpose = purpose.substring(0, 47) + "...";
+        // 파일명이 너무 길면 잘라내기 (파일명 전체 길이 고려)
+        if (fileName.length() > 100) {
+            fileName = fileName.substring(0, 97) + "...";
         }
         
         // 파일명 끝의 언더스코어 제거
-        purpose = purpose.replaceAll("_+$", "");
-        if (purpose.isEmpty()) {
-            purpose = "document";
+        fileName = fileName.replaceAll("_+$", "");
+        if (fileName.isEmpty()) {
+            fileName = "document";
         }
         
-        return String.format("%s_%s.md", serial, purpose);
+        // 원본 파일 확장자가 있으면 사용, 없으면 .md 사용
+        String extension = ".md";
+        if (document.getOriginalFileName() != null && !document.getOriginalFileName().isEmpty()) {
+            String originalName = document.getOriginalFileName();
+            int lastDotIndex = originalName.lastIndexOf('.');
+            if (lastDotIndex != -1) {
+                extension = originalName.substring(lastDotIndex);
+            }
+        }
+        
+        return String.format("%s_%s%s", serial, fileName, extension);
     }
     
     /**
-     * GitHub 레포지토리 파일명 생성
+     * GitHub 레포지토리 파일명 생성 - (코드)_(생성된 제목).(파일형식) 형태
      */
     private String generateRepositoryFileName(DocumentEntity document, String repoUrl) {
         String serial = document.getSerial().getFull();
-        String repoName = extractRepositoryName(repoUrl);
+        String title = sanitizeFileName(document.getPurpose());
         
-        return String.format("%s_%s.md", serial, repoName);
+        // purpose가 비어있거나 너무 길면 레포지토리명 사용
+        if (title.isEmpty() || title.length() > 50) {
+            title = extractRepositoryName(repoUrl);
+        }
+        
+        // 제목이 여전히 너무 길면 더 짧게 잘라내기
+        if (title.length() > 30) {
+            title = title.substring(0, 27) + "...";
+        }
+        
+        return String.format("%s_%s.md", serial, title);
     }
     
     /**
@@ -402,10 +519,16 @@ public class LocalFileStorageService {
                                                 String subName = subDir.getFileName().toString();
                                                 Map<String, Object> subData = new HashMap<>();
                                                 
-                                                // 파일 목록 조회
+                                                // 파일 목록 조회 (MD, DOCX, XLSX, PDF 파일 포함)
                                                 List<Map<String, Object>> files = Files.list(subDir)
                                                     .filter(Files::isRegularFile)
-                                                    .filter(path -> path.toString().endsWith(".md"))
+                                                    .filter(path -> {
+                                                        String fileName = path.toString().toLowerCase();
+                                                        return fileName.endsWith(".md") || 
+                                                               fileName.endsWith(".docx") || 
+                                                               fileName.endsWith(".xlsx") || 
+                                                               fileName.endsWith(".pdf");
+                                                    })
                                                     .map(file -> {
                                                         Map<String, Object> fileData = new HashMap<>();
                                                         fileData.put("name", file.getFileName().toString());
@@ -464,10 +587,10 @@ public class LocalFileStorageService {
      */
     public Map<String, Object> getFilesByCategory(String majorCode, String midCode, String subCode) {
         try {
-            // 카테고리 경로 생성
-            String majorDir = majorCode + "_" + sanitizeFileName(getCategoryName(majorCode));
-            String midDir = midCode + "_" + sanitizeFileName(getCategoryName(midCode));
-            String subDir = subCode + "_" + sanitizeFileName(getCategoryName(subCode));
+            // 카테고리 경로 생성 - 이미 언더스코어가 포함된 경우 그대로 사용
+            String majorDir = majorCode.contains("_") ? majorCode : majorCode + "_" + sanitizeFileName(getCategoryName(majorCode));
+            String midDir = midCode.contains("_") ? midCode : midCode + "_" + sanitizeFileName(getCategoryName(midCode));
+            String subDir = subCode.contains("_") ? subCode : subCode + "_" + sanitizeFileName(getCategoryName(subCode));
             
             Path categoryPath = Paths.get(storageBasePath, majorDir, midDir, subDir);
             
@@ -479,10 +602,16 @@ public class LocalFileStorageService {
                 return Map.of("files", List.of(), "fileCount", 0, "category", majorCode + "/" + midCode + "/" + subCode);
             }
             
-            // 파일 목록 조회
+            // 파일 목록 조회 (MD, DOCX, XLSX, PDF 파일 포함)
             List<Map<String, Object>> files = Files.list(categoryPath)
                 .filter(Files::isRegularFile)
-                .filter(path -> path.toString().endsWith(".md"))
+                .filter(path -> {
+                    String fileName = path.toString().toLowerCase();
+                    return fileName.endsWith(".md") || 
+                           fileName.endsWith(".docx") || 
+                           fileName.endsWith(".xlsx") || 
+                           fileName.endsWith(".pdf");
+                })
                 .map(file -> {
                     Map<String, Object> fileData = new HashMap<>();
                     fileData.put("name", file.getFileName().toString());
@@ -521,31 +650,58 @@ public class LocalFileStorageService {
     }
     
     /**
-     * 카테고리 코드에서 이름 추출 (간단한 매핑)
+     * 카테고리 코드에서 이름 추출 (데이터베이스에서 조회)
      */
     private String getCategoryName(String code) {
-        // 실제로는 데이터베이스에서 조회해야 하지만, 여기서는 간단한 매핑 사용
-        switch (code) {
-            case "A": return "소프트웨어";
-            case "A01": return "웹개발";
-            case "A0101": return "프론트엔드";
-            case "A0102": return "백엔드";
-            case "A_소프트웨어": return "소프트웨어";
-            case "A01_웹개발": return "웹개발";
-            case "A0101_프론트엔드": return "프론트엔드";
-            case "A0102_백엔드": return "백엔드";
-            case "IT": return "정보기술";
-            case "WEB": return "웹개발";
-            case "FRONT": return "프론트엔드";
-            case "BACK": return "백엔드";
-            default: return code;
+        try {
+            // 코드에서 언더스코어와 함께 온 경우 처리 (예: A_소프트웨어 -> A)
+            String cleanCode = code;
+            if (code.contains("_")) {
+                cleanCode = code.split("_")[0];
+            }
+            
+            // 데이터베이스에서 카테고리 조회
+            return catalogNodeRepository.findByCodeAndActiveTrue(cleanCode)
+                .map(CatalogNode::getName)
+                .orElse(code); // 조회 실패 시 원본 코드 반환
+                
+        } catch (Exception e) {
+            log.warn("카테고리 이름 조회 실패: {}, 원본 코드 반환: {}", code, e.getMessage());
+            return code;
         }
     }
     
     /**
-     * 문서의 파일 경로 조회
+     * 문서의 파일 경로 조회 (파일 존재 여부와 관계없이 경로 반환)
      */
     public String getDocumentFilePath(DocumentEntity document) {
+        try {
+            if (document.getCategory() == null) {
+                return null;
+            }
+            
+            // 카테고리 경로 생성
+            String majorDir = document.getCategory().getMajorCode() + "_" + sanitizeFileName(document.getCategory().getMajorName());
+            String midDir = document.getCategory().getMidCode() + "_" + sanitizeFileName(document.getCategory().getMidName());
+            String subDir = document.getCategory().getSubCode() + "_" + sanitizeFileName(document.getCategory().getSubName());
+            
+            // 파일명 생성
+            String fileName = generateFileName(document);
+            
+            Path filePath = Paths.get(storageBasePath, majorDir, midDir, subDir, fileName);
+            
+            return filePath.toString();
+            
+        } catch (Exception e) {
+            log.error("문서 파일 경로 조회 중 오류 발생: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    /**
+     * 문서의 파일 경로 조회 (파일이 존재하는 경우만)
+     */
+    public String getExistingDocumentFilePath(DocumentEntity document) {
         try {
             if (document.getCategory() == null) {
                 return null;
@@ -570,6 +726,46 @@ public class LocalFileStorageService {
         } catch (Exception e) {
             log.error("문서 파일 경로 조회 중 오류 발생: {}", e.getMessage(), e);
             return null;
+        }
+    }
+    
+    /**
+     * 문서 파일 삭제
+     */
+    public boolean deleteDocumentFile(DocumentEntity document) {
+        try {
+            if (document.getCategory() == null) {
+                log.warn("문서 카테고리가 없어 파일 삭제 불가: {}", document.getId());
+                return false;
+            }
+            
+            // 카테고리 경로 생성
+            String majorDir = document.getCategory().getMajorCode() + "_" + sanitizeFileName(document.getCategory().getMajorName());
+            String midDir = document.getCategory().getMidCode() + "_" + sanitizeFileName(document.getCategory().getMidName());
+            String subDir = document.getCategory().getSubCode() + "_" + sanitizeFileName(document.getCategory().getSubName());
+            
+            // 파일명 생성
+            String fileName = generateFileName(document);
+            
+            Path filePath = Paths.get(storageBasePath, majorDir, midDir, subDir, fileName);
+            
+            if (Files.exists(filePath)) {
+                boolean deleted = Files.deleteIfExists(filePath);
+                if (deleted) {
+                    log.info("파일 삭제 성공: {}", filePath);
+                    return true;
+                } else {
+                    log.warn("파일 삭제 실패: {}", filePath);
+                    return false;
+                }
+            } else {
+                log.info("삭제할 파일이 존재하지 않음: {}", filePath);
+                return true; // 파일이 없으면 삭제 성공으로 간주
+            }
+            
+        } catch (Exception e) {
+            log.error("문서 파일 삭제 중 오류 발생: {}", e.getMessage(), e);
+            return false;
         }
     }
     
@@ -705,6 +901,76 @@ public class LocalFileStorageService {
         } catch (Exception e) {
             log.warn("레포지토리 이름 추출 실패: {}", repoUrl, e);
             return "repository";
+        }
+    }
+    
+    /**
+     * 코드로 파일시스템의 파일을 삭제 (벡터DB에 없는 파일용)
+     */
+    public boolean deleteFileByCode(String code) {
+        try {
+            log.info("코드로 파일 삭제 시도: {}", code);
+            
+            // 모든 카테고리 디렉토리를 순회하며 해당 코드의 파일을 찾아서 삭제
+            Path storagePath = Paths.get(storageBasePath);
+            if (!Files.exists(storagePath)) {
+                log.warn("저장소 경로가 존재하지 않음: {}", storageBasePath);
+                return false;
+            }
+            
+            boolean deleted = false;
+            
+            // 대분류 디렉토리 순회
+            try (DirectoryStream<Path> majorDirs = Files.newDirectoryStream(storagePath)) {
+                for (Path majorDir : majorDirs) {
+                    if (!Files.isDirectory(majorDir)) continue;
+                    
+                    // 중분류 디렉토리 순회
+                    try (DirectoryStream<Path> midDirs = Files.newDirectoryStream(majorDir)) {
+                        for (Path midDir : midDirs) {
+                            if (!Files.isDirectory(midDir)) continue;
+                            
+                            // 소분류 디렉토리 순회
+                            try (DirectoryStream<Path> subDirs = Files.newDirectoryStream(midDir)) {
+                                for (Path subDir : subDirs) {
+                                    if (!Files.isDirectory(subDir)) continue;
+                                    
+                                    // 해당 디렉토리에서 코드로 시작하는 파일 찾기
+                                    try (DirectoryStream<Path> files = Files.newDirectoryStream(subDir)) {
+                                        for (Path file : files) {
+                                            if (Files.isRegularFile(file)) {
+                                                String fileName = file.getFileName().toString();
+                                                // 파일명이 코드로 시작하는지 확인
+                                                if (fileName.startsWith(code + "_")) {
+                                                    boolean fileDeleted = Files.deleteIfExists(file);
+                                                    if (fileDeleted) {
+                                                        log.info("파일 삭제 성공: {}", file);
+                                                        deleted = true;
+                                                    } else {
+                                                        log.warn("파일 삭제 실패: {}", file);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (deleted) {
+                log.info("코드 {}의 파일 삭제 완료", code);
+            } else {
+                log.warn("코드 {}에 해당하는 파일을 찾을 수 없음", code);
+            }
+            
+            return deleted;
+            
+        } catch (Exception e) {
+            log.error("코드로 파일 삭제 중 오류 발생: {}", e.getMessage(), e);
+            return false;
         }
     }
 }

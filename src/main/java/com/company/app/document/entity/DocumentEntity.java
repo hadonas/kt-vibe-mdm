@@ -10,7 +10,6 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
@@ -32,6 +31,7 @@ public class DocumentEntity extends BaseEntity {
     private String purpose;
     private String content;
     private Source source;
+    private String originalFileName; // 원본 파일명 저장
     private List<String> tags;
     private VectorEmbeddings vectors;
     private Integer shardId;  // 해시 기반 샤딩을 위한 샤드 ID

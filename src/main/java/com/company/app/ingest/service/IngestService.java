@@ -5,6 +5,7 @@ import com.company.app.ingest.dto.SingleIngestRequest;
 import com.company.app.ingest.entity.IngestRequest;
 import com.company.app.ingest.repository.IngestRequestRepository;
 import com.company.app.file.service.LocalFileStorageService;
+import com.company.app.file.service.FileAnalysisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ public class IngestService {
     private final IngestRequestRepository ingestRequestRepository;
     private final RepositoryAnalysisService repositoryAnalysisService;
     private final LocalFileStorageService localFileStorageService;
+    private final FileAnalysisService fileAnalysisService;
     
     public Map<String, Object> createRepoPreview(String repoUrl, String accessToken) {
         try {
@@ -35,6 +37,7 @@ public class IngestService {
             Map<String, Object> preview = new HashMap<>();
             preview.put("extractedText", analysisResult.getExtractedText());
             preview.put("proposedCategory", analysisResult.getProposedCategory());
+            preview.put("proposedTitle", analysisResult.getProposedTitle());
             preview.put("proposedPurpose", analysisResult.getProposedPurpose());
             preview.put("expectedEffects", analysisResult.getExpectedEffects());
             preview.put("techStack", analysisResult.getTechStack());
@@ -50,6 +53,7 @@ public class IngestService {
             Map<String, Object> preview = new HashMap<>();
             preview.put("extractedText", "레포지토리 분석 중 오류가 발생했습니다. URL을 확인하고 다시 시도해주세요.");
             preview.put("proposedCategory", new Category("A", "소프트웨어", "A01", "웹개발", "A0101", "프론트엔드"));
+            preview.put("proposedTitle", "프로젝트");
             preview.put("proposedPurpose", "소프트웨어 개발 프로젝트");
             preview.put("expectedEffects", "프로젝트의 구체적인 효과는 추가 분석이 필요합니다.");
             preview.put("techStack", List.of("Unknown"));
@@ -68,6 +72,32 @@ public class IngestService {
         ingestRequest.setTags(request.getTags());
         ingestRequest.setStatus(IngestRequest.Status.PENDING);
         ingestRequest.setRequestedAt(LocalDateTime.now());
+        
+        // 파일 분석 결과에서 온 카테고리와 제목 정보 저장
+        if (request.getProposedCategory() != null) {
+            ingestRequest.setProposedCategory(request.getProposedCategory());
+        }
+        if (request.getProposedTitle() != null) {
+            ingestRequest.setProposedTitle(request.getProposedTitle());
+        }
+        if (request.getOriginalFileName() != null) {
+            ingestRequest.setOriginalFileName(request.getOriginalFileName());
+        }
+        
+        // DOCX/XLSX 파일의 경우 FileAnalysisService를 통해 내용 추출
+        if (request.getFileIds() != null && !request.getFileIds().isEmpty()) {
+            try {
+                String fileId = request.getFileIds().get(0);
+                // 임시 파일에서 내용 추출
+                String extractedText = fileAnalysisService.extractTextFromTemporaryFile(fileId);
+                if (extractedText != null && !extractedText.isEmpty()) {
+                    ingestRequest.setExtractedText(extractedText);
+                }
+            } catch (Exception e) {
+                log.warn("파일 내용 추출 실패: {}", e.getMessage());
+                ingestRequest.setExtractedText("파일 내용을 추출할 수 없습니다.");
+            }
+        }
         
         IngestRequest saved = ingestRequestRepository.save(ingestRequest);
         
@@ -97,6 +127,9 @@ public class IngestService {
             }
             if (preview.containsKey("proposedCategory")) {
                 ingestRequest.setProposedCategory((Category) preview.get("proposedCategory"));
+            }
+            if (preview.containsKey("proposedTitle")) {
+                ingestRequest.setProposedTitle((String) preview.get("proposedTitle"));
             }
         } catch (Exception e) {
             log.warn("레포지토리 분석 중 오류 발생, 기본값으로 설정: {}", e.getMessage());
@@ -128,16 +161,6 @@ public class IngestService {
         return response;
     }
     
-    public Map<String, Object> processBulkIngest(String userId, MultipartFile file, String type) {
-        // TODO: 벌크 처리 로직 구현
-        Map<String, Object> response = new HashMap<>();
-        response.put("totalProcessed", 0);
-        response.put("successCount", 0);
-        response.put("errorCount", 0);
-        response.put("errors", List.of());
-        
-        return response;
-    }
     
     public Map<String, Object> resubmitRequest(String id, String userId, Map<String, Object> request) {
         // TODO: 재등록 로직 구현

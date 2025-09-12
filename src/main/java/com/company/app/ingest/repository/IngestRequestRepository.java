@@ -19,6 +19,11 @@ public interface IngestRequestRepository extends MongoRepository<IngestRequest, 
     
     List<IngestRequest> findByOwnerId(String ownerId);
     
+    Page<IngestRequest> findByOwnerId(String ownerId, Pageable pageable);
+    
+    @Query("{'ownerId': ?0, 'status': ?1}")
+    Page<IngestRequest> findByOwnerIdAndStatus(String ownerId, IngestRequest.Status status, Pageable pageable);
+    
     @Query("{'status': ?0, 'requestedAt': {'$gte': ?1, '$lte': ?2}}")
     List<IngestRequest> findByStatusAndRequestedAtBetween(
             IngestRequest.Status status, 

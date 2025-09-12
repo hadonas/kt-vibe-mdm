@@ -3,6 +3,7 @@ package com.company.app.search.service;
 import com.company.app.document.entity.DocumentEntity;
 import com.company.app.document.repository.DocumentRepository;
 import com.company.app.search.util.VectorShardingUtil;
+import com.company.app.chat.service.LLMService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -25,6 +26,7 @@ public class FaissVectorSearchService {
     private final DocumentRepository documentRepository;
     private final EmbeddingService embeddingService;
     private final VectorShardingUtil shardingUtil;
+    private final LLMService llmService;
     
     // FAISS 인덱스들을 샤드별로 저장
     private final Map<Integer, FaissIndex> shardIndexes = new ConcurrentHashMap<>();
@@ -240,31 +242,21 @@ public class FaissVectorSearchService {
     }
     
     /**
-     * 쿼리 확장 - 관련 키워드와 동의어 추가
+     * AI 기반 쿼리 확장 - 관련 키워드와 동의어 추가
      */
     private List<String> expandQuery(String originalQuery) {
         List<String> expandedQueries = new ArrayList<>();
         expandedQueries.add(originalQuery);
         
-        // AI 상담 관련 키워드 매핑
-        Map<String, List<String>> keywordMapping = Map.of(
-            "ai", List.of("인공지능", "artificial intelligence", "머신러닝", "machine learning"),
-            "상담", List.of("컨설팅", "고객지원", "customer service", "support", "도움말"),
-            "서비스", List.of("시스템", "플랫폼", "솔루션", "platform", "solution"),
-            "관련", List.of("관련된", "연관된", "관련", "related", "associated")
-        );
-        
-        // 원본 쿼리에서 키워드 추출 및 확장
-        String lowerQuery = originalQuery.toLowerCase();
-        for (Map.Entry<String, List<String>> entry : keywordMapping.entrySet()) {
-            if (lowerQuery.contains(entry.getKey())) {
-                for (String synonym : entry.getValue()) {
-                    String expandedQuery = originalQuery.replace(entry.getKey(), synonym);
-                    if (!expandedQuery.equals(originalQuery)) {
-                        expandedQueries.add(expandedQuery);
-                    }
-                }
-            }
+        try {
+            // AI를 사용하여 쿼리 확장
+            List<String> aiExpandedQueries = expandQueryWithAI(originalQuery);
+            expandedQueries.addAll(aiExpandedQueries);
+            
+            log.info("AI 기반 쿼리 확장 완료: {} -> {}", originalQuery, aiExpandedQueries);
+            
+        } catch (Exception e) {
+            log.warn("AI 쿼리 확장 실패: {}", e.getMessage());
         }
         
         // 부분 키워드 검색을 위한 단어 분리
@@ -276,6 +268,240 @@ public class FaissVectorSearchService {
         }
         
         return expandedQueries.stream().distinct().collect(Collectors.toList());
+    }
+    
+    /**
+     * AI를 사용한 쿼리 확장
+     */
+    private List<String> expandQueryWithAI(String query) {
+        try {
+            // AI에게 쿼리 확장 요청
+            String prompt = String.format(
+                "다음 검색 쿼리를 분석하고 관련된 키워드와 동의어를 생성해주세요. " +
+                "기술 스택, 프레임워크, 카테고리별로 관련 키워드를 찾아주세요.\n\n" +
+                "원본 쿼리: \"%s\"\n\n" +
+                "다음 형식으로 응답해주세요:\n" +
+                "1. 관련 기술 키워드 (예: spring, java, backend)\n" +
+                "2. 동의어 (예: 서버, server, api)\n" +
+                "3. 카테고리 키워드 (예: 웹개발, 프론트엔드, 백엔드)\n" +
+                "4. 관련 프레임워크 (예: nextjs, react, django)\n\n" +
+                "각 항목을 쉼표로 구분하여 한 줄씩 작성해주세요.",
+                query
+            );
+            
+            // LLM 서비스 호출 (실제 구현에서는 LLMService 사용)
+            String aiResponse = callLLMForQueryExpansion(prompt);
+            
+            // AI 응답을 파싱하여 키워드 리스트 생성
+            return parseAIResponse(aiResponse);
+            
+        } catch (Exception e) {
+            log.error("AI 쿼리 확장 중 오류: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * LLM을 호출하여 쿼리 확장 수행
+     */
+    private String callLLMForQueryExpansion(String prompt) {
+        try {
+            // 실제 LLM 서비스 호출
+            return llmService.generateText(prompt);
+            
+        } catch (Exception e) {
+            log.error("LLM 호출 실패: {}", e.getMessage(), e);
+            throw e;
+        }
+    }
+    
+    /**
+     * AI 응답을 파싱하여 키워드 리스트 생성
+     */
+    private List<String> parseAIResponse(String aiResponse) {
+        List<String> keywords = new ArrayList<>();
+        
+        try {
+            String[] lines = aiResponse.split("\n");
+            for (String line : lines) {
+                if (line.trim().isEmpty()) continue;
+                
+                // 번호나 마커 제거 (예: "1. ", "2. ", "- ")
+                String cleanLine = line.replaceAll("^\\d+\\.\\s*", "")
+                                     .replaceAll("^-\\s*", "")
+                                     .trim();
+                
+                if (!cleanLine.isEmpty()) {
+                    // 쉼표로 구분된 키워드들을 분리
+                    String[] parts = cleanLine.split(",");
+                    for (String part : parts) {
+                        String keyword = part.trim();
+                        if (!keyword.isEmpty() && keyword.length() > 1) {
+                            keywords.add(keyword);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("AI 응답 파싱 실패: {}", e.getMessage());
+        }
+        
+        return keywords;
+    }
+    
+    
+    /**
+     * 쿼리에서 필터링 키워드 추출
+     */
+    private List<String> extractFilterKeywords(String query) {
+        List<String> filterKeywords = new ArrayList<>();
+        String lowerQuery = query.toLowerCase();
+        
+        // 기술 스택 키워드 추출
+        String[] techKeywords = {
+            "백엔드", "backend", "spring", "java", "python", "nodejs", "express", "django", "flask", "fastapi",
+            "프론트엔드", "frontend", "nextjs", "react", "vue", "angular", "javascript", "typescript", "html", "css",
+            "모바일", "mobile", "android", "ios", "flutter", "react native",
+            "데이터베이스", "database", "mysql", "mongodb", "postgresql",
+            "웹", "web", "웹개발", "web development", "웹사이트", "website"
+        };
+        
+        for (String keyword : techKeywords) {
+            if (lowerQuery.contains(keyword.toLowerCase())) {
+                filterKeywords.add(keyword);
+            }
+        }
+        
+        return filterKeywords;
+    }
+    
+    /**
+     * 문서가 검색 결과에 포함되어야 하는지 판단
+     */
+    private boolean shouldIncludeDocument(DocumentEntity doc, String query, List<String> filterKeywords) {
+        if (filterKeywords.isEmpty()) {
+            return true; // 필터링 키워드가 없으면 모든 문서 포함
+        }
+        
+        String docContent = (doc.getContent() != null ? doc.getContent() : "").toLowerCase();
+        String docPurpose = (doc.getPurpose() != null ? doc.getPurpose() : "").toLowerCase();
+        String docTags = (doc.getTags() != null ? String.join(" ", doc.getTags()) : "").toLowerCase();
+        
+        // 카테고리 정보 확인
+        String categoryInfo = "";
+        if (doc.getCategory() != null) {
+            categoryInfo = (doc.getCategory().getMajorName() + " " + 
+                          doc.getCategory().getMidName() + " " + 
+                          doc.getCategory().getSubName()).toLowerCase();
+        }
+        
+        String allDocText = docContent + " " + docPurpose + " " + docTags + " " + categoryInfo;
+        
+        // 프론트엔드 관련 키워드가 있으면 프론트엔드 문서만 포함
+        if (containsFrontendKeywords(filterKeywords)) {
+            return containsFrontendKeywords(List.of(allDocText)) || 
+                   (doc.getCategory() != null && 
+                    doc.getCategory().getSubName() != null && 
+                    doc.getCategory().getSubName().toLowerCase().contains("프론트"));
+        }
+        
+        // 백엔드 관련 키워드가 있으면 백엔드 문서만 포함
+        if (containsBackendKeywords(filterKeywords)) {
+            return containsBackendKeywords(List.of(allDocText)) || 
+                   (doc.getCategory() != null && 
+                    doc.getCategory().getSubName() != null && 
+                    doc.getCategory().getSubName().toLowerCase().contains("백엔드"));
+        }
+        
+        // 웹개발 관련 키워드가 있으면 웹개발 문서만 포함
+        if (containsWebKeywords(filterKeywords)) {
+            return containsWebKeywords(List.of(allDocText)) || 
+                   (doc.getCategory() != null && 
+                    doc.getCategory().getMidName() != null && 
+                    doc.getCategory().getMidName().toLowerCase().contains("웹"));
+        }
+        
+        // 모바일 관련 키워드가 있으면 모바일 문서만 포함
+        if (containsMobileKeywords(filterKeywords)) {
+            return containsMobileKeywords(List.of(allDocText));
+        }
+        
+        return true; // 기본적으로 모든 문서 포함
+    }
+    
+    /**
+     * 프론트엔드 관련 키워드 확인
+     */
+    private boolean containsFrontendKeywords(List<String> keywords) {
+        String[] frontendKeywords = {
+            "프론트엔드", "frontend", "nextjs", "react", "vue", "angular", 
+            "javascript", "typescript", "html", "css", "ui", "ux"
+        };
+        
+        for (String keyword : keywords) {
+            for (String frontendKeyword : frontendKeywords) {
+                if (keyword.toLowerCase().contains(frontendKeyword.toLowerCase())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * 백엔드 관련 키워드 확인
+     */
+    private boolean containsBackendKeywords(List<String> keywords) {
+        String[] backendKeywords = {
+            "백엔드", "backend", "spring", "java", "python", "nodejs", "express", 
+            "django", "flask", "fastapi", "서버", "server", "api", "데이터베이스", "database"
+        };
+        
+        for (String keyword : keywords) {
+            for (String backendKeyword : backendKeywords) {
+                if (keyword.toLowerCase().contains(backendKeyword.toLowerCase())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * 웹개발 관련 키워드 확인
+     */
+    private boolean containsWebKeywords(List<String> keywords) {
+        String[] webKeywords = {
+            "웹", "web", "웹개발", "web development", "웹사이트", "website", 
+            "웹 애플리케이션", "web application"
+        };
+        
+        for (String keyword : keywords) {
+            for (String webKeyword : webKeywords) {
+                if (keyword.toLowerCase().contains(webKeyword.toLowerCase())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * 모바일 관련 키워드 확인
+     */
+    private boolean containsMobileKeywords(List<String> keywords) {
+        String[] mobileKeywords = {
+            "모바일", "mobile", "android", "ios", "flutter", "react native", "앱", "app"
+        };
+        
+        for (String keyword : keywords) {
+            for (String mobileKeyword : mobileKeywords) {
+                if (keyword.toLowerCase().contains(mobileKeyword.toLowerCase())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
     
     /**
@@ -335,11 +561,19 @@ public class FaissVectorSearchService {
         
         Map<String, DocumentWithScore> documentScores = new HashMap<>();
         
+        // 쿼리 분석을 통한 필터링 키워드 추출
+        List<String> filterKeywords = extractFilterKeywords(query);
+        log.info("필터링 키워드: {}", filterKeywords);
+        
         // Vector Search 결과 점수 부여 (0.7 가중치)
         for (int i = 0; i < vectorResults.size(); i++) {
             DocumentEntity doc = vectorResults.get(i);
             double score = 0.7 * (1.0 - (double) i / vectorResults.size());
-            documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+            
+            // 키워드 필터링 적용
+            if (shouldIncludeDocument(doc, query, filterKeywords)) {
+                documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+            }
         }
         
         // Keyword Search 결과 점수 부여 (0.3 가중치)
@@ -347,13 +581,16 @@ public class FaissVectorSearchService {
             DocumentEntity doc = keywordResults.get(i);
             double score = 0.3 * (1.0 - (double) i / keywordResults.size());
             
-            if (documentScores.containsKey(doc.getId())) {
-                // 이미 있는 문서면 점수 합산
-                DocumentWithScore existing = documentScores.get(doc.getId());
-                documentScores.put(doc.getId(), 
-                    new DocumentWithScore(doc, existing.score + score));
-            } else {
-                documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+            // 키워드 필터링 적용
+            if (shouldIncludeDocument(doc, query, filterKeywords)) {
+                if (documentScores.containsKey(doc.getId())) {
+                    // 이미 있는 문서면 점수 합산
+                    DocumentWithScore existing = documentScores.get(doc.getId());
+                    documentScores.put(doc.getId(), 
+                        new DocumentWithScore(doc, existing.score + score));
+                } else {
+                    documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+                }
             }
         }
         
@@ -424,11 +661,19 @@ public class FaissVectorSearchService {
         
         Map<String, DocumentWithScore> documentScores = new HashMap<>();
         
+        // 쿼리 분석을 통한 필터링 키워드 추출
+        List<String> filterKeywords = extractFilterKeywords(query);
+        log.info("필터링 키워드 (점수 포함): {}", filterKeywords);
+        
         // Vector Search 결과 점수 부여 (0.7 가중치)
         for (int i = 0; i < vectorResults.size(); i++) {
             DocumentEntity doc = vectorResults.get(i);
             double score = 0.7 * (1.0 - (double) i / vectorResults.size());
-            documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+            
+            // 키워드 필터링 적용
+            if (shouldIncludeDocument(doc, query, filterKeywords)) {
+                documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+            }
         }
         
         // Keyword Search 결과 점수 부여 (0.3 가중치)
@@ -436,13 +681,16 @@ public class FaissVectorSearchService {
             DocumentEntity doc = keywordResults.get(i);
             double score = 0.3 * (1.0 - (double) i / keywordResults.size());
             
-            if (documentScores.containsKey(doc.getId())) {
-                // 이미 있는 문서면 점수 합산
-                DocumentWithScore existing = documentScores.get(doc.getId());
-                documentScores.put(doc.getId(), 
-                    new DocumentWithScore(doc, existing.score + score));
-            } else {
-                documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+            // 키워드 필터링 적용
+            if (shouldIncludeDocument(doc, query, filterKeywords)) {
+                if (documentScores.containsKey(doc.getId())) {
+                    // 이미 있는 문서면 점수 합산
+                    DocumentWithScore existing = documentScores.get(doc.getId());
+                    documentScores.put(doc.getId(), 
+                        new DocumentWithScore(doc, existing.score + score));
+                } else {
+                    documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+                }
             }
         }
         

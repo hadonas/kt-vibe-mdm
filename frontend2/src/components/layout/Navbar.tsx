@@ -11,7 +11,8 @@ import {
   ChatBubbleLeftRightIcon,
   ClipboardDocumentCheckIcon,
   HomeIcon,
-  CogIcon
+  CogIcon,
+  UserIcon
 } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/hooks/useAuth'
@@ -30,7 +31,7 @@ export default function Navbar() {
     { name: '대시보드', href: '/dashboard', icon: HomeIcon },
     { name: '단일 문서 등록', href: '/ingest/document', icon: DocumentTextIcon },
     { name: '레포지토리 등록', href: '/ingest/repository', icon: FolderIcon },
-    { name: '벌크 등록', href: '/ingest/bulk', icon: ClipboardDocumentCheckIcon },
+    { name: '내 요청 관리', href: '/my-requests', icon: UserIcon },
     { name: 'RAG 채팅', href: '/chat', icon: ChatBubbleLeftRightIcon },
   ]
 
@@ -43,7 +44,7 @@ export default function Navbar() {
   }
 
   // 관리자 전용 메뉴
-  if (user?.role === 'ADMIN') {
+  if (user?.roles?.includes('ADMIN')) {
     navigation.push({ 
       name: '관리자', 
       href: '/admin', 

@@ -2,6 +2,7 @@ package com.company.app.approval.controller;
 
 import com.company.app.approval.service.ApprovalService;
 import com.company.app.approval.dto.ApprovalDecisionRequest;
+import com.company.app.auth.entity.User;
 import com.company.app.ingest.entity.IngestRequest;
 import com.company.app.ingest.repository.IngestRequestRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -166,6 +167,54 @@ public class ApprovalController {
             log.error("승인/반려 결정 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError()
                 .body(Map.of("error", "승인/반려 처리 중 오류가 발생했습니다."));
+        }
+    }
+    
+    /**
+     * 사용자별 승인 요청 조회
+     */
+    @GetMapping("/my-requests")
+    @Operation(summary = "사용자별 승인 요청 조회")
+    public ResponseEntity<Map<String, Object>> getMyRequests(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String status,
+            Authentication authentication) {
+        try {
+            User user = (User) authentication.getPrincipal();
+            String userId = user.getId();
+            log.info("사용자별 승인 요청 조회 요청: userId={}, page={}, size={}, status={}", userId, page, size, status);
+            
+            Pageable pageable = PageRequest.of(page, size, Sort.by("requestedAt").descending());
+            Page<IngestRequest> requests;
+            
+            if (status != null && !status.isEmpty()) {
+                try {
+                    IngestRequest.Status requestStatus = IngestRequest.Status.valueOf(status.toUpperCase());
+                    requests = ingestRequestRepository.findByOwnerIdAndStatus(userId, requestStatus, pageable);
+                } catch (IllegalArgumentException e) {
+                    log.warn("잘못된 상태 값: {}", status);
+                    requests = ingestRequestRepository.findByOwnerId(userId, pageable);
+                }
+            } else {
+                requests = ingestRequestRepository.findByOwnerId(userId, pageable);
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("content", requests.getContent());
+            response.put("totalElements", requests.getTotalElements());
+            response.put("totalPages", requests.getTotalPages());
+            response.put("currentPage", page);
+            response.put("size", size);
+            response.put("first", requests.isFirst());
+            response.put("last", requests.isLast());
+            
+            log.info("사용자별 승인 요청 조회 완료: {}개 요청", requests.getTotalElements());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("사용자별 승인 요청 조회 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
         }
     }
     

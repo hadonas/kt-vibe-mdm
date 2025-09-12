@@ -4,6 +4,7 @@ import com.company.app.document.entity.DocumentEntity;
 import com.company.app.document.repository.DocumentRepository;
 import com.company.app.catalog.entity.CatalogNode;
 import com.company.app.catalog.repository.CatalogNodeRepository;
+import com.company.app.auth.entity.User;
 import com.company.app.file.service.LocalFileStorageService;
 import com.company.app.search.service.FaissVectorSearchService;
 import lombok.RequiredArgsConstructor;
@@ -14,10 +15,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
+import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.MediaType;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -277,6 +280,29 @@ public class AdminController {
     }
     
     /**
+     * 전체 문서 수 조회 (모든 사용자 접근 가능)
+     */
+    @GetMapping("/documents/count")
+    @Operation(summary = "전체 문서 수 조회")
+    public ResponseEntity<Map<String, Object>> getDocumentCount() {
+        try {
+            log.info("전체 문서 수 조회 요청");
+            
+            long totalDocuments = documentRepository.count();
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("totalDocuments", totalDocuments);
+            
+            log.info("전체 문서 수 조회 완료: {}개", totalDocuments);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("전체 문서 수 조회 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
      * 로컬 파일 저장소의 계층 구조 조회
      */
     @GetMapping("/files/hierarchy")
@@ -322,10 +348,66 @@ public class AdminController {
     }
     
     /**
-     * 파일 다운로드
+     * 코드 기반 파일 다운로드 (모든 인증된 사용자 접근 가능)
+     */
+    @GetMapping("/files/download-by-code")
+    @Operation(summary = "코드로 파일 다운로드")
+    public ResponseEntity<Resource> downloadFileByCode(@RequestParam String code) {
+        try {
+            log.info("코드 기반 파일 다운로드 요청: {}", code);
+            
+            // 코드로 문서 찾기
+            Optional<DocumentEntity> documentOpt = documentRepository.findBySerialFull(code);
+            if (documentOpt.isEmpty()) {
+                log.warn("코드에 해당하는 문서를 찾을 수 없음: {}", code);
+                return ResponseEntity.notFound().build();
+            }
+            
+            DocumentEntity document = documentOpt.get();
+            String filePath = localFileStorageService.getDocumentFilePath(document);
+            
+            if (filePath == null || filePath.isEmpty()) {
+                log.warn("문서의 파일 경로가 없음: {}", code);
+                return ResponseEntity.notFound().build();
+            }
+            
+            // 파일 경로 검증 (보안을 위해 storage 디렉토리 내의 파일만 허용)
+            Path file = Paths.get(filePath);
+            Path storagePath = Paths.get(localFileStorageService.getStoragePath());
+            
+            if (!file.startsWith(storagePath)) {
+                log.warn("접근이 허용되지 않은 파일 경로: {}", filePath);
+                return ResponseEntity.badRequest().build();
+            }
+            
+            Resource resource = new UrlResource(file.toUri());
+            
+            if (!resource.exists() || !resource.isReadable()) {
+                log.warn("파일을 찾을 수 없거나 읽을 수 없음: {}", filePath);
+                return ResponseEntity.notFound().build();
+            }
+            
+            String fileName = file.getFileName().toString();
+            String contentType = determineContentType(fileName);
+            
+            log.info("코드 기반 파일 다운로드 완료: {} -> {}", code, fileName);
+            
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                    .body(resource);
+                    
+        } catch (Exception e) {
+            log.error("코드 기반 파일 다운로드 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * 파일 다운로드 (모든 인증된 사용자 접근 가능)
      */
     @GetMapping("/files/download")
-    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "파일 다운로드")
     public ResponseEntity<Resource> downloadFile(@RequestParam String filePath) {
         try {
             log.info("파일 다운로드 요청: {}", filePath);
@@ -404,8 +486,24 @@ public class AdminController {
             Optional<DocumentEntity> documentOpt = documentRepository.findBySerialFull(code);
             
             if (documentOpt.isEmpty()) {
-                log.warn("삭제할 문서를 찾을 수 없음: {}", code);
-                return ResponseEntity.notFound().build();
+                log.warn("MongoDB에서 문서를 찾을 수 없음, 파일시스템에서만 삭제 시도: {}", code);
+                
+                // Fallback: 파일시스템에서만 삭제 시도
+                boolean fileDeleted = localFileStorageService.deleteFileByCode(code);
+                
+                if (fileDeleted) {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("code", code);
+                    result.put("deletedDocuments", 0);
+                    result.put("deletedFiles", 1);
+                    result.put("message", String.format("코드 %s의 파일이 파일시스템에서 삭제되었습니다. (MongoDB에 문서가 없었음)", code));
+                    
+                    log.info("파일시스템에서만 파일 삭제 완료: {}", code);
+                    return ResponseEntity.ok(result);
+                } else {
+                    log.warn("파일시스템에서도 삭제할 파일을 찾을 수 없음: {}", code);
+                    return ResponseEntity.notFound().build();
+                }
             }
             
             List<DocumentEntity> documents = List.of(documentOpt.get());
@@ -425,15 +523,11 @@ public class AdminController {
                     log.info("MongoDB에서 문서 삭제: {}", document.getId());
                     
                     // 4. 파일시스템에서 파일 삭제
-                    String filePath = localFileStorageService.getDocumentFilePath(document);
-                    if (filePath != null) {
-                        java.io.File file = new java.io.File(filePath);
-                        if (file.exists() && file.delete()) {
-                            fileDeletedCount++;
-                            log.info("파일시스템에서 파일 삭제: {}", filePath);
-                        } else {
-                            log.warn("파일 삭제 실패: {}", filePath);
-                        }
+                    if (localFileStorageService.deleteDocumentFile(document)) {
+                        fileDeletedCount++;
+                        log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial().getFull());
+                    } else {
+                        log.warn("파일시스템에서 파일 삭제 실패: {}", document.getSerial().getFull());
                     }
                     
                 } catch (Exception e) {
@@ -507,4 +601,40 @@ public class AdminController {
             return ResponseEntity.internalServerError().build();
         }
     }
+    
+    /**
+     * 사용자별 문서 조회
+     */
+    @GetMapping("/my-documents")
+    @Operation(summary = "사용자별 문서 조회")
+    public ResponseEntity<Map<String, Object>> getMyDocuments(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+        try {
+            User user = (User) authentication.getPrincipal();
+            String userId = user.getId();
+            log.info("사용자별 문서 조회 요청: userId={}, page={}, size={}", userId, page, size);
+            
+            Pageable pageable = PageRequest.of(page, size, Sort.by("approvedAt").descending());
+            Page<DocumentEntity> documents = documentRepository.findByOwnerId(userId, pageable);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("content", documents.getContent());
+            response.put("totalElements", documents.getTotalElements());
+            response.put("totalPages", documents.getTotalPages());
+            response.put("currentPage", page);
+            response.put("size", size);
+            response.put("first", documents.isFirst());
+            response.put("last", documents.isLast());
+            
+            log.info("사용자별 문서 조회 완료: {}개 문서", documents.getTotalElements());
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("사용자별 문서 조회 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
 }

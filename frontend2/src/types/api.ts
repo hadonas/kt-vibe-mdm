@@ -32,6 +32,9 @@ export interface SingleIngestRequest {
   fileIds?: string[]
   purpose?: string
   tags?: string[]
+  proposedCategory?: Category
+  proposedTitle?: string
+  originalFileName?: string
 }
 
 export interface IngestPreviewResponse {
@@ -47,15 +50,6 @@ export interface IngestRequestResponse {
   requestedAt: string
 }
 
-export interface BulkIngestResponse {
-  totalProcessed: number
-  successCount: number
-  errorCount: number
-  errors: Array<{
-    row: number
-    error: string
-  }>
-}
 
 // Category Types
 export interface Category {
@@ -81,7 +75,8 @@ export interface ApprovalRequest {
   ownerId: string
   source: Source
   extractedText: string
-  proposedCategory: Category
+  proposedCategory?: Category
+  proposedTitle?: string
   proposedPurpose: string
   similarCandidates: SimilarCandidate[]
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'IMPORTED'

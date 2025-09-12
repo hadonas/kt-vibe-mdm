@@ -17,6 +17,7 @@ public class ChatQueryResponse {
         private String docId;
         private String serial;
         private String snippet;
+        private String filename;
         private double score;
     }
 }

@@ -54,7 +54,7 @@ interface DocumentsResponse {
 }
 
 export default function AdminPage() {
-  const { user, token } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const [hierarchy, setHierarchy] = useState<HierarchyResponse | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<{
     major: string;
@@ -88,7 +88,7 @@ export default function AdminPage() {
       
       console.log('🔍 Fetching hierarchy with token:', token ? 'Token present' : 'No token');
       
-      const response = await fetch('/api/admin/files/hierarchy', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'}/admin/files/hierarchy`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -120,7 +120,7 @@ export default function AdminPage() {
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`/api/admin/files/category/${major}/${mid}/${sub}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'}/admin/files/category/${major}/${mid}/${sub}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -160,7 +160,7 @@ export default function AdminPage() {
         return;
       }
 
-      const response = await fetch(`/api/admin/files/download?filePath=${encodeURIComponent(filePath)}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'}/admin/files/download?filePath=${encodeURIComponent(filePath)}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -245,6 +245,17 @@ export default function AdminPage() {
     setDeleteCode('');
     setError(null);
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <h1 className="text-2xl font-bold text-blue-600 mb-4">로딩 중...</h1>
+          <p className="text-gray-600">사용자 정보를 확인하고 있습니다.</p>
+        </Card>
+      </div>
+    );
+  }
 
   if (!user || !user.roles.includes('ADMIN')) {
     return (

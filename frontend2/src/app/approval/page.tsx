@@ -72,9 +72,10 @@ export default function ApprovalPage() {
       const term = searchTerm.toLowerCase()
       filtered = filtered.filter(req => 
         req.proposedPurpose.toLowerCase().includes(term) ||
-        req.proposedCategory.majorName.toLowerCase().includes(term) ||
-        req.proposedCategory.midName.toLowerCase().includes(term) ||
-        req.proposedCategory.subName.toLowerCase().includes(term)
+        (req.proposedTitle && req.proposedTitle.toLowerCase().includes(term)) ||
+        (req.proposedCategory?.majorName && req.proposedCategory.majorName.toLowerCase().includes(term)) ||
+        (req.proposedCategory?.midName && req.proposedCategory.midName.toLowerCase().includes(term)) ||
+        (req.proposedCategory?.subName && req.proposedCategory.subName.toLowerCase().includes(term))
       )
     }
 
@@ -277,11 +278,14 @@ export default function ApprovalPage() {
                       </div>
                       
                       <h3 className="font-medium text-gray-900 mb-1 line-clamp-2">
-                        {request.proposedPurpose}
+                        {request.proposedTitle || request.proposedPurpose}
                       </h3>
                       
                       <p className="text-sm text-gray-600 mb-2">
-                        {request.proposedCategory.majorName} &gt; {request.proposedCategory.midName} &gt; {request.proposedCategory.subName}
+                        {request.proposedCategory ? 
+                          `${request.proposedCategory.majorName} > ${request.proposedCategory.midName} > ${request.proposedCategory.subName}` :
+                          '카테고리 미분류'
+                        }
                       </p>
                       
                       {request.similarCandidates && request.similarCandidates.length > 0 && (
@@ -345,17 +349,35 @@ export default function ApprovalPage() {
                 <div>
                   <h4 className="font-medium text-gray-900 mb-2">제안된 카테고리</h4>
                   <div className="bg-gray-50 p-3 rounded-md">
-                    <p className="text-sm">
-                      <span className="font-medium">대분류:</span> {selectedRequest.proposedCategory.majorName} ({selectedRequest.proposedCategory.majorCode})
-                    </p>
-                    <p className="text-sm">
-                      <span className="font-medium">중분류:</span> {selectedRequest.proposedCategory.midName} ({selectedRequest.proposedCategory.midCode})
-                    </p>
-                    <p className="text-sm">
-                      <span className="font-medium">소분류:</span> {selectedRequest.proposedCategory.subName} ({selectedRequest.proposedCategory.subCode})
-                    </p>
+                    {selectedRequest.proposedCategory ? (
+                      <>
+                        <p className="text-sm">
+                          <span className="font-medium">대분류:</span> {selectedRequest.proposedCategory.majorName} ({selectedRequest.proposedCategory.majorCode})
+                        </p>
+                        <p className="text-sm">
+                          <span className="font-medium">중분류:</span> {selectedRequest.proposedCategory.midName} ({selectedRequest.proposedCategory.midCode})
+                        </p>
+                        <p className="text-sm">
+                          <span className="font-medium">소분류:</span> {selectedRequest.proposedCategory.subName} ({selectedRequest.proposedCategory.subCode})
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-gray-500">카테고리가 제안되지 않았습니다.</p>
+                    )}
                   </div>
                 </div>
+
+                {/* 제목 */}
+                {selectedRequest.proposedTitle && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">AI 생성 제목</h4>
+                    <div className="bg-blue-50 p-3 rounded-md">
+                      <p className="text-sm text-blue-700 font-medium">
+                        {selectedRequest.proposedTitle}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* 목적 */}
                 <div>

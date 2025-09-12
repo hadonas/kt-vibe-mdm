@@ -28,7 +28,9 @@ public class IngestRequest extends BaseEntity {
     private Source source;
     private String extractedText;
     private Category proposedCategory;
+    private String proposedTitle;
     private String proposedPurpose;
+    private String originalFileName; // 원본 파일명 저장
     private List<String> tags;
     private List<SimilarCandidate> similarCandidates;
     private Status status;
