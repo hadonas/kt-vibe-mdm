@@ -53,6 +53,10 @@ services:
       MAX_ARCHIVE_SIZE_MB: ${MAX_ARCHIVE_SIZE_MB:-50}
       FILE_STORAGE_TYPE: ${FILE_STORAGE_TYPE:-gridfs}
       
+      # 로컬 파일 저장소 설정
+      FILE_STORAGE_PATH: ${FILE_STORAGE_PATH:-/app/storage}
+      FILE_TEMP_PATH: ${FILE_TEMP_PATH:-/app/temp}
+      
       # AI 서비스 설정
       EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-http://localhost:11434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embed-3}
@@ -73,6 +77,9 @@ services:
       
       # CORS 설정 (프론트엔드 연결용)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+    volumes:
+      - storage_data:/app/storage
+      - temp_data:/app/temp
     depends_on:
       - mongodb
     networks:
@@ -107,6 +114,8 @@ services:
 
 volumes:
   mongodb_data:
+  storage_data:
+  temp_data:
 
 networks:
   mdm-network:

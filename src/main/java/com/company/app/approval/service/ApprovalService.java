@@ -8,6 +8,8 @@ import com.company.app.document.repository.DocumentRepository;
 import com.company.app.common.dto.Serial;
 import com.company.app.common.dto.Category;
 import com.company.app.common.dto.Source;
+import com.company.app.file.service.LocalFileStorageService;
+import com.company.app.ingest.service.RepositoryAnalysisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -27,6 +29,8 @@ public class ApprovalService {
     
     private final IngestRequestRepository ingestRequestRepository;
     private final DocumentRepository documentRepository;
+    private final LocalFileStorageService localFileStorageService;
+    private final RepositoryAnalysisService repositoryAnalysisService;
     
     public Page<IngestRequest> getApprovalRequests(int page, int size, String status) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "requestedAt"));
@@ -87,11 +91,15 @@ public class ApprovalService {
             // 1. DocumentEntity 생성
             DocumentEntity document = createDocumentFromIngestRequest(request);
             
-            // 2. 벡터 DB에 저장
+            // 2. 벡터 DB에 저장 (승인 시에만)
             DocumentEntity savedDocument = documentRepository.save(document);
             log.info("문서가 벡터 DB에 저장됨: {}", savedDocument.getId());
             
-            // 3. 처리 완료 상태로 변경
+            // 3. 임시 파일을 최종 저장소로 이동
+            String savedFilePath = moveTempFileToFinal(request, savedDocument);
+            log.info("문서가 최종 저장소에 저장됨: {}", savedFilePath);
+            
+            // 4. 처리 완료 상태로 변경
             request.setStatus(IngestRequest.Status.COMPLETED);
             request.setProcessedAt(LocalDateTime.now());
             
@@ -100,6 +108,83 @@ public class ApprovalService {
             log.error("승인된 요청 처리 실패: {}", request.getId(), e);
             request.setStatus(IngestRequest.Status.FAILED);
             throw new RuntimeException("승인된 요청 처리 중 오류가 발생했습니다.", e);
+        }
+    }
+    
+    /**
+     * 임시 파일을 최종 저장소로 이동
+     */
+    private String moveTempFileToFinal(IngestRequest request, DocumentEntity document) {
+        try {
+            // 소스 타입에 따라 다른 처리
+            if (request.getSource().getType().equals("REPO") && request.getSource().getRepoUrl() != null) {
+                // GitHub 레포지토리인 경우: 분석 결과를 최종 저장소로 이동
+                String analysisResult = generateRepositoryAnalysisResult(request);
+                return localFileStorageService.saveRepositoryAnalysis(
+                    document, 
+                    request.getSource().getRepoUrl(), 
+                    analysisResult
+                );
+            } else {
+                // 일반 파일인 경우: 임시 파일을 최종 저장소로 이동
+                // TODO: 파일 업로드의 경우 임시 저장소에서 최종 저장소로 이동하는 로직 구현
+                return localFileStorageService.saveDocument(document);
+            }
+        } catch (Exception e) {
+            log.error("임시 파일을 최종 저장소로 이동 중 오류 발생: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    /**
+     * 문서를 로컬 파일 시스템에 저장 (기존 메서드 - 호환성을 위해 유지)
+     */
+    private String saveDocumentToLocalFileSystem(DocumentEntity document, IngestRequest request) {
+        try {
+            // 소스 타입에 따라 다른 저장 방식 사용
+            if (request.getSource().getType().equals("REPO") && request.getSource().getRepoUrl() != null) {
+                // GitHub 레포지토리인 경우: 분석 결과와 함께 저장
+                String analysisResult = generateRepositoryAnalysisResult(request);
+                return localFileStorageService.saveRepositoryAnalysis(
+                    document, 
+                    request.getSource().getRepoUrl(), 
+                    analysisResult
+                );
+            } else {
+                // 일반 파일인 경우: 파일 내용 그대로 저장
+                return localFileStorageService.saveDocument(document);
+            }
+        } catch (Exception e) {
+            log.error("로컬 파일 저장 중 오류 발생: {}", e.getMessage(), e);
+            throw new RuntimeException("로컬 파일 저장에 실패했습니다: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * GitHub 레포지토리 분석 결과 생성
+     */
+    private String generateRepositoryAnalysisResult(IngestRequest request) {
+        try {
+            // RepositoryAnalysisService를 사용하여 분석 수행
+            if (request.getSource().getRepoUrl() != null) {
+                // 실제 분석은 RepositoryAnalysisService에서 수행
+                // 여기서는 추출된 텍스트를 기반으로 간단한 분석 결과 생성
+                StringBuilder analysis = new StringBuilder();
+                analysis.append("## 레포지토리 분석 개요\n");
+                analysis.append("- **URL**: ").append(request.getSource().getRepoUrl()).append("\n");
+                analysis.append("- **분석일**: ").append(LocalDateTime.now()).append("\n");
+                analysis.append("- **파일 수**: ").append(request.getSource().getFiles() != null ? request.getSource().getFiles().size() : 0).append("개\n\n");
+                
+                analysis.append("## 추출된 내용\n");
+                analysis.append(request.getExtractedText());
+                
+                return analysis.toString();
+            } else {
+                return "레포지토리 URL이 없습니다.";
+            }
+        } catch (Exception e) {
+            log.error("레포지토리 분석 결과 생성 중 오류: {}", e.getMessage(), e);
+            return "분석 중 오류가 발생했습니다: " + e.getMessage();
         }
     }
     
@@ -131,17 +216,44 @@ public class ApprovalService {
         document.setOwnerId(request.getOwnerId());
         document.setSerial(serial);
         document.setCategory(category);
-        document.setPurpose(request.getProposedPurpose());
+        document.setPurpose(request.getProposedPurpose() != null ? request.getProposedPurpose() : "제목 없음");
         document.setContent(request.getExtractedText());
         document.setSource(source);
         document.setTags(request.getTags());
         document.setRequestedAt(request.getRequestedAt());
-        document.setApprovedAt(request.getApprovedAt());
+        document.setApprovedAt(LocalDateTime.now()); // 승인 시점을 현재 시간으로 설정
         document.setVersion(1);
         
         // 벡터 임베딩은 나중에 별도 서비스에서 처리
         // document.setVectors(createVectorEmbeddings(request));
         
         return document;
+    }
+    
+    /**
+     * 반려된 요청 처리
+     */
+    public void processRejectedRequest(IngestRequest request, String approverId, String reason) {
+        log.info("반려 요청 처리 시작: {}, approver: {}", request.getId(), approverId);
+        
+        try {
+            // 요청 상태를 REJECTED로 변경
+            request.setStatus(IngestRequest.Status.REJECTED);
+            request.setApprovedAt(LocalDateTime.now());
+            request.setApproverId(approverId);
+            request.setApprovalReason(reason);
+            
+            // 요청 저장
+            ingestRequestRepository.save(request);
+            
+            // 임시 파일 정리
+            localFileStorageService.cleanupTempFiles(request.getId());
+            
+            log.info("반려 요청 처리 완료: {}", request.getId());
+            
+        } catch (Exception e) {
+            log.error("반려 요청 처리 중 오류 발생: {}", e.getMessage(), e);
+            throw new RuntimeException("반려 요청 처리 중 오류가 발생했습니다.", e);
+        }
     }
 }

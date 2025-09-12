@@ -28,6 +28,14 @@ jwt:
   expiration: 86400000 # 24 hours
   issuer: ${JWT_ISSUER:app.local}
 
+# Application Configuration
+app:
+  file:
+    storage:
+      path: ${FILE_STORAGE_PATH:/app/storage}
+    temp:
+      path: ${FILE_TEMP_PATH:/app/temp}
+
 # MongoDB Vector Search
 atlas:
   vector:
@@ -54,6 +62,13 @@ ai:
   llm:
     api-base: ${LLM_API_BASE:http://localhost:11434}
     model: ${LLM_MODEL:llama3.2}
+
+# LLM API Configuration
+llm:
+  api:
+    key: ${AI_API_KEY:sk-test-key}
+    base: ${LLM_API_BASE:https://api.openai.com/v1}
+  model: ${LLM_MODEL:gpt-5-mini}
 
 # OpenAPI Documentation
 springdoc:

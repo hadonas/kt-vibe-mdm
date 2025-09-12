@@ -3,6 +3,7 @@ package com.company.app.chat.service;
 import com.company.app.chat.dto.ChatQueryRequest;
 import com.company.app.chat.dto.ChatQueryResponse;
 import com.company.app.search.service.FaissVectorSearchService;
+import com.company.app.document.entity.DocumentEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,7 +17,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ChatService {
     
-    private final FaissVectorSearchService vectorSearchService;
+    private final FaissVectorSearchService faissVectorSearchService;
     private final LLMService llmService;
     
     public ChatQueryResponse processQuery(String userId, ChatQueryRequest request) {
@@ -26,34 +27,38 @@ public class ChatService {
         try {
             log.info("Processing chat query from user {}: {}", userId, request.getQuery());
             
-            // 1. 하이브리드 검색으로 관련 문서 찾기 (FAISS Vector + Text Search)
-            var searchResults = vectorSearchService.hybridSearch(request.getQuery(), 5);
+            // 1. 하이브리드 검색으로 관련 문서 찾기 (FAISS Vector + Text Search, 점수 포함)
+            var searchResults = faissVectorSearchService.hybridSearchWithScores(request.getQuery(), 5);
             log.info("벡터 검색 결과: {} 개 문서 발견", searchResults != null ? searchResults.size() : 0);
             
-            // 2. 검색 결과를 소스로 변환
+            // 2. 검색 결과를 소스로 변환 (유사도 순으로 정렬됨)
             List<ChatQueryResponse.Source> sources = new ArrayList<>();
             List<String> contextDocuments = new ArrayList<>();
             
             if (searchResults != null && !searchResults.isEmpty()) {
                 for (var result : searchResults) {
-                    log.info("문서 변환: ID={}, Serial={}, Content 길이={}", 
-                        result.getId(), 
-                        result.getSerial() != null ? result.getSerial().getFull() : "N/A",
-                        result.getContent() != null ? result.getContent().length() : 0);
+                    DocumentEntity doc = result.getDocument();
+                    double score = result.getScore();
                     
-                    // 소스 정보 생성
+                    log.info("문서 변환: ID={}, Serial={}, Content 길이={}, Score={}", 
+                        doc.getId(), 
+                        doc.getSerial() != null ? doc.getSerial().getFull() : "N/A",
+                        doc.getContent() != null ? doc.getContent().length() : 0,
+                        score);
+                    
+                    // 소스 정보 생성 (실제 검색 점수 사용)
                     sources.add(ChatQueryResponse.Source.builder()
-                            .docId(result.getId())
-                            .serial(result.getSerial() != null ? result.getSerial().getFull() : "N/A")
-                            .snippet(result.getContent() != null ? 
-                                result.getContent().substring(0, Math.min(200, result.getContent().length())) + "..." : 
+                            .docId(doc.getId())
+                            .serial(doc.getSerial() != null ? doc.getSerial().getFull() : "N/A")
+                            .snippet(doc.getContent() != null ? 
+                                doc.getContent().substring(0, Math.min(200, doc.getContent().length())) + "..." : 
                                 "내용 없음")
-                            .score(0.8) // 임시 점수
+                            .score(score) // 실제 검색 점수 사용
                             .build());
                     
                     // LLM 컨텍스트용 전체 문서 내용 추가
-                    if (result.getContent() != null && !result.getContent().trim().isEmpty()) {
-                        contextDocuments.add(result.getContent());
+                    if (doc.getContent() != null && !doc.getContent().trim().isEmpty()) {
+                        contextDocuments.add(doc.getContent());
                     }
                 }
             } else {

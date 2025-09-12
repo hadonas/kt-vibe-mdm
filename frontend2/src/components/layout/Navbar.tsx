@@ -10,7 +10,8 @@ import {
   FolderIcon,
   ChatBubbleLeftRightIcon,
   ClipboardDocumentCheckIcon,
-  HomeIcon
+  HomeIcon,
+  CogIcon
 } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/hooks/useAuth'
@@ -38,6 +39,15 @@ export default function Navbar() {
       name: '승인 관리', 
       href: '/approval', 
       icon: ClipboardDocumentCheckIcon 
+    })
+  }
+
+  // 관리자 전용 메뉴
+  if (user?.role === 'ADMIN') {
+    navigation.push({ 
+      name: '관리자', 
+      href: '/admin', 
+      icon: CogIcon 
     })
   }
 

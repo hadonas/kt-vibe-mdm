@@ -62,6 +62,11 @@ export class AuthService {
     return !!localStorage.getItem('accessToken')
   }
 
+  static getToken(): string | null {
+    if (typeof window === 'undefined') return null
+    return localStorage.getItem('accessToken')
+  }
+
   static hasRole(role: 'USER' | 'APPROVER' | 'ADMIN'): boolean {
     const user = this.getCurrentUser()
     return user?.roles.includes(role) ?? false

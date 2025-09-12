@@ -101,6 +101,13 @@ public class FaissVectorSearchService {
             documents.clear();
             vectors.clear();
         }
+        
+        public void removeDocument(int index) {
+            if (index >= 0 && index < documents.size()) {
+                documents.remove(index);
+                vectors.remove(index);
+            }
+        }
     }
     
     /**
@@ -359,15 +366,112 @@ public class FaissVectorSearchService {
     }
     
     /**
+     * 점수 정보를 포함한 검색 결과를 반환하는 하이브리드 검색
+     */
+    public List<DocumentWithScore> hybridSearchWithScores(String query, int topK) {
+        try {
+            log.info("FAISS 하이브리드 검색 (점수 포함) 시작: {}자 쿼리, 상위 {}개", query.length(), topK);
+            
+            // 1. 쿼리 전처리 및 확장
+            List<String> expandedQueries = expandQuery(query);
+            log.info("확장된 쿼리: {}", expandedQueries);
+            
+            // 2. FAISS Vector Search로 유사 문서 검색 (의미적 유사성)
+            List<DocumentEntity> vectorResults = findSimilarDocuments(query, topK * 2);
+            log.info("벡터 검색 결과: {}개", vectorResults.size());
+            
+            // 3. 확장된 쿼리로 추가 벡터 검색
+            for (String expandedQuery : expandedQueries) {
+                if (!expandedQuery.equals(query)) {
+                    List<DocumentEntity> expandedResults = findSimilarDocuments(expandedQuery, topK);
+                    vectorResults.addAll(expandedResults);
+                }
+            }
+            
+            // 4. MongoDB Text Search로 키워드 매칭 (정확한 텍스트 매칭)
+            List<DocumentEntity> textResults = performTextSearch(query, topK * 2);
+            log.info("텍스트 검색 결과: {}개", textResults.size());
+            
+            // 5. 확장된 쿼리로 추가 텍스트 검색
+            for (String expandedQuery : expandedQueries) {
+                if (!expandedQuery.equals(query)) {
+                    List<DocumentEntity> expandedTextResults = performTextSearch(expandedQuery, topK);
+                    textResults.addAll(expandedTextResults);
+                }
+            }
+            
+            // 6. 결과를 결합하고 점수 정규화
+            List<DocumentWithScore> combinedResults = combineSearchResultsWithScores(
+                vectorResults, textResults, query, topK);
+            
+            log.info("FAISS 하이브리드 검색 (점수 포함) 완료: {}개 문서 발견", combinedResults.size());
+            return combinedResults;
+            
+        } catch (Exception e) {
+            log.error("FAISS 하이브리드 검색 (점수 포함) 중 오류 발생: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * 점수 정보를 포함한 검색 결과를 결합하고 점수 정규화
+     */
+    private List<DocumentWithScore> combineSearchResultsWithScores(
+            List<DocumentEntity> vectorResults, 
+            List<DocumentEntity> keywordResults, 
+            String query, 
+            int topK) {
+        
+        Map<String, DocumentWithScore> documentScores = new HashMap<>();
+        
+        // Vector Search 결과 점수 부여 (0.7 가중치)
+        for (int i = 0; i < vectorResults.size(); i++) {
+            DocumentEntity doc = vectorResults.get(i);
+            double score = 0.7 * (1.0 - (double) i / vectorResults.size());
+            documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+        }
+        
+        // Keyword Search 결과 점수 부여 (0.3 가중치)
+        for (int i = 0; i < keywordResults.size(); i++) {
+            DocumentEntity doc = keywordResults.get(i);
+            double score = 0.3 * (1.0 - (double) i / keywordResults.size());
+            
+            if (documentScores.containsKey(doc.getId())) {
+                // 이미 있는 문서면 점수 합산
+                DocumentWithScore existing = documentScores.get(doc.getId());
+                documentScores.put(doc.getId(), 
+                    new DocumentWithScore(doc, existing.score + score));
+            } else {
+                documentScores.put(doc.getId(), new DocumentWithScore(doc, score));
+            }
+        }
+        
+        // 점수 순으로 정렬하여 상위 K개 반환
+        return documentScores.values().stream()
+            .sorted((a, b) -> Double.compare(b.score, a.score))
+            .limit(topK)
+            .collect(Collectors.toList());
+    }
+    
+    
+    /**
      * 문서와 점수를 함께 저장하는 내부 클래스
      */
-    private static class DocumentWithScore {
+    public static class DocumentWithScore {
         final DocumentEntity document;
         final double score;
         
         DocumentWithScore(DocumentEntity document, double score) {
             this.document = document;
             this.score = score;
+        }
+        
+        public DocumentEntity getDocument() {
+            return document;
+        }
+        
+        public double getScore() {
+            return score;
         }
     }
     

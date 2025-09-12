@@ -6,7 +6,8 @@ import {
   PaperAirplaneIcon, 
   DocumentTextIcon,
   UserIcon,
-  ChatBubbleLeftRightIcon
+  ChatBubbleLeftRightIcon,
+  ArrowDownTrayIcon
 } from '@heroicons/react/24/outline'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -42,6 +43,39 @@ export default function ChatPage() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const downloadFile = async (docId: string, fileName: string) => {
+    try {
+      const token = localStorage.getItem('accessToken')
+      if (!token) {
+        setError('로그인이 필요합니다.')
+        return
+      }
+
+      const response = await fetch(`/api/admin/files/download?filePath=${encodeURIComponent(`/app/storage/A_소프트웨어/A01_웹개발/A0101_프론트엔드/${fileName}`)}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error('파일 다운로드에 실패했습니다.')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (err) {
+      console.error('Download error:', err)
+      setError('파일 다운로드 중 오류가 발생했습니다.')
+    }
   }
 
   useEffect(() => {
@@ -240,11 +274,22 @@ export default function ChatPage() {
                             key={index}
                             className="bg-gray-50 p-2 rounded text-xs"
                           >
-                            <div className="flex items-center space-x-1 mb-1">
-                              <DocumentTextIcon className="h-3 w-3 text-gray-500" />
-                              <span className="font-medium text-gray-700">
-                                {source.serial}
-                              </span>
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center space-x-1">
+                                <DocumentTextIcon className="h-3 w-3 text-gray-500" />
+                                <span className="font-medium text-gray-700">
+                                  {source.serial}
+                                </span>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => downloadFile(source.docId, `${source.serial}.md`)}
+                                className="h-6 px-2 text-xs"
+                              >
+                                <ArrowDownTrayIcon className="h-3 w-3 mr-1" />
+                                다운로드
+                              </Button>
                             </div>
                             <p className="text-gray-600 line-clamp-2">
                               {source.snippet}

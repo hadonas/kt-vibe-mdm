@@ -4,6 +4,7 @@ import com.company.app.common.dto.Category;
 import com.company.app.ingest.dto.SingleIngestRequest;
 import com.company.app.ingest.entity.IngestRequest;
 import com.company.app.ingest.repository.IngestRequestRepository;
+import com.company.app.file.service.LocalFileStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ public class IngestService {
     
     private final IngestRequestRepository ingestRequestRepository;
     private final RepositoryAnalysisService repositoryAnalysisService;
+    private final LocalFileStorageService localFileStorageService;
     
     public Map<String, Object> createRepoPreview(String repoUrl, String accessToken) {
         try {
@@ -102,6 +104,20 @@ public class IngestService {
         }
         
         IngestRequest saved = ingestRequestRepository.save(ingestRequest);
+        
+        // 임시 저장소에 분석 결과 저장
+        try {
+            if (saved.getExtractedText() != null && !saved.getExtractedText().isEmpty()) {
+                String tempFilePath = localFileStorageService.saveTempRepositoryAnalysis(
+                    saved.getId(), 
+                    request.getRepoUrl(), 
+                    saved.getExtractedText()
+                );
+                log.info("레포지토리 분석 결과가 임시 저장소에 저장됨: {}", tempFilePath);
+            }
+        } catch (Exception e) {
+            log.warn("임시 저장소에 분석 결과 저장 실패: {}", e.getMessage());
+        }
         
         Map<String, Object> response = new HashMap<>();
         response.put("id", saved.getId());

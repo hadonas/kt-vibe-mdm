@@ -18,7 +18,7 @@ import { formatDate } from '@/lib/utils'
 import { mockApi, NOT_IMPLEMENTED_ERROR } from '@/lib/mock-api'
 import { isApiImplemented } from '@/lib/api-status'
 
-type StatusFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'IMPORTED'
+type StatusFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED'
 
 export default function ApprovalPage() {
   const [requests, setRequests] = useState<ApprovalRequest[]>([])
@@ -150,7 +150,7 @@ export default function ApprovalPage() {
         return 'text-green-600 bg-green-100'
       case 'REJECTED':
         return 'text-red-600 bg-red-100'
-      case 'IMPORTED':
+      case 'COMPLETED':
         return 'text-blue-600 bg-blue-100'
       default:
         return 'text-gray-600 bg-gray-100'
@@ -165,7 +165,7 @@ export default function ApprovalPage() {
         return '승인됨'
       case 'REJECTED':
         return '반려됨'
-      case 'IMPORTED':
+      case 'COMPLETED':
         return '등록완료'
       default:
         return status
@@ -202,7 +202,7 @@ export default function ApprovalPage() {
         <CardContent className="p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
             <div className="flex flex-wrap gap-2">
-              {(['ALL', 'PENDING', 'APPROVED', 'REJECTED', 'IMPORTED'] as StatusFilter[]).map((status) => (
+              {(['ALL', 'PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'] as StatusFilter[]).map((status) => (
                 <Button
                   key={status}
                   variant={statusFilter === status ? 'default' : 'outline'}

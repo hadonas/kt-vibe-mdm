@@ -9,7 +9,9 @@ import {
   ChatBubbleLeftRightIcon,
   ClipboardDocumentCheckIcon,
   UserGroupIcon,
-  ChartBarIcon
+  ChartBarIcon,
+  CogIcon,
+  ServerIcon
 } from '@heroicons/react/24/outline'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { useAuth } from '@/hooks/useAuth'
@@ -189,6 +191,57 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {/* 관리자 전용 섹션 */}
+      {isAdmin && (
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+            <CogIcon className="h-6 w-6 mr-2 text-purple-600" />
+            관리자 도구
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-purple-200">
+              <Link href="/admin">
+                <CardHeader>
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 rounded-lg bg-purple-500">
+                      <ServerIcon className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg text-purple-700">파일 관리</CardTitle>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    저장된 파일들의 계층 구조를 확인하고 관리합니다.
+                  </CardDescription>
+                </CardContent>
+              </Link>
+            </Card>
+            
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-red-200">
+              <Link href="/approval">
+                <CardHeader>
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 rounded-lg bg-red-500">
+                      <ClipboardDocumentCheckIcon className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg text-red-700">승인 관리</CardTitle>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    등록 요청을 승인하거나 반려 처리합니다.
+                  </CardDescription>
+                </CardContent>
+              </Link>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {/* 최근 활동 */}
       <div>

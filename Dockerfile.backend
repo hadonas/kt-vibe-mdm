@@ -31,6 +31,10 @@ COPY --from=builder /app/build/libs/*.jar app.jar
 
 # Create non-root user
 RUN addgroup --system spring && adduser --system spring --ingroup spring
+
+# Create storage and temp directories and set permissions
+RUN mkdir -p /app/storage /app/temp && chown -R spring:spring /app/storage /app/temp
+
 USER spring:spring
 
 # Expose port
