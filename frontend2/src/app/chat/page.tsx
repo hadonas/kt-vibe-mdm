@@ -72,20 +72,11 @@ export default function ChatPage() {
       const contentDisposition = response.headers.get('Content-Disposition')
       let actualFileName = fileName // 기본값으로 전달받은 파일명 사용
       
-      console.log('🔍 Response headers:', response.headers)
-      console.log('🔍 Content-Disposition:', contentDisposition)
-      console.log('🔍 All headers keys:', Array.from(response.headers.keys()))
-      
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename="([^"]+)"/)
         if (filenameMatch) {
           actualFileName = filenameMatch[1]
-          console.log('✅ Extracted filename:', actualFileName)
-        } else {
-          console.log('❌ Failed to extract filename from:', contentDisposition)
         }
-      } else {
-        console.log('❌ Content-Disposition header not found')
       }
 
       const blob = await response.blob()
