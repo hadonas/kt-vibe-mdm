@@ -68,11 +68,31 @@ export default function ChatPage() {
         throw new Error('파일 다운로드에 실패했습니다.')
       }
 
+      // Content-Disposition 헤더에서 실제 파일명 추출
+      const contentDisposition = response.headers.get('Content-Disposition')
+      let actualFileName = fileName // 기본값으로 전달받은 파일명 사용
+      
+      console.log('🔍 Response headers:', response.headers)
+      console.log('🔍 Content-Disposition:', contentDisposition)
+      console.log('🔍 All headers keys:', Array.from(response.headers.keys()))
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="([^"]+)"/)
+        if (filenameMatch) {
+          actualFileName = filenameMatch[1]
+          console.log('✅ Extracted filename:', actualFileName)
+        } else {
+          console.log('❌ Failed to extract filename from:', contentDisposition)
+        }
+      } else {
+        console.log('❌ Content-Disposition header not found')
+      }
+
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = fileName
+      a.download = actualFileName // 서버에서 보내준 실제 파일명 사용
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)

@@ -389,12 +389,13 @@ public class AdminController {
             
             String fileName = file.getFileName().toString();
             String contentType = determineContentType(fileName);
+            String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
             
             log.info("코드 기반 파일 다운로드 완료: {} -> {}", code, fileName);
             
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(contentType))
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + code + "." + extension + "\"")
                     .body(resource);
                     
         } catch (Exception e) {
