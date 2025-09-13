@@ -160,7 +160,7 @@ export default function AdminPage() {
         return;
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'}/admin/files/download?filePath=${encodeURIComponent(filePath)}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'}/public/files/download?filePath=${encodeURIComponent(filePath)}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

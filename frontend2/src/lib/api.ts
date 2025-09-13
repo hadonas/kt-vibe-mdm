@@ -41,7 +41,30 @@ api.interceptors.response.use(
   }
 )
 
-// Admin API functions
+// Public API functions (no admin role required)
+export const publicApi = {
+  // Get document count
+  getDocumentCount: () => 
+    api.get('/public/documents/count'),
+  
+  // Download file by code
+  downloadFileByCode: (code: string) => 
+    api.get(`/public/files/download-by-code?code=${encodeURIComponent(code)}`, {
+      responseType: 'blob'
+    }),
+  
+  // Download file
+  downloadFile: (filePath: string) => 
+    api.get(`/public/files/download?filePath=${encodeURIComponent(filePath)}`, {
+      responseType: 'blob'
+    }),
+  
+  // Get my documents
+  getMyDocuments: (page = 0, size = 20) => 
+    api.get(`/public/my-documents?page=${page}&size=${size}`)
+}
+
+// Admin API functions (admin role required)
 export const adminApi = {
   // Get all documents
   getDocuments: (page = 0, size = 20) => 
@@ -61,13 +84,7 @@ export const adminApi = {
   
   // Delete document by code
   deleteDocumentByCode: (code: string) => 
-    api.delete(`/admin/documents/${code}`),
-  
-  // Download file
-  downloadFile: (filePath: string) => 
-    api.get(`/admin/files/download?filePath=${encodeURIComponent(filePath)}`, {
-      responseType: 'blob'
-    })
+    api.delete(`/admin/documents/${code}`)
 }
 
 export default api

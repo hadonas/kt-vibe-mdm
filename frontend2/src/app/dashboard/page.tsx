@@ -83,7 +83,7 @@ const DashboardPage = () => {
           const j = r.ok ? await r.json() : { totalFiles: 0 }
           totalDocuments = j.totalFiles ?? 0
         } else {
-          const r = await fetchWithTimeout(`${apiBaseUrl}/admin/documents/count`, {
+          const r = await fetchWithTimeout(`${apiBaseUrl}/public/documents/count`, {
             headers: { Authorization: `Bearer ${token}` },
           })
           const j = r.ok ? await r.json() : { totalDocuments: 0 }
@@ -96,7 +96,7 @@ const DashboardPage = () => {
         })
         const myPending = myPendingRes.ok ? (await myPendingRes.json()).totalElements ?? 0 : 0
 
-        const myDocsRes = await fetchWithTimeout(`${apiBaseUrl}/admin/my-documents?size=1`, {
+        const myDocsRes = await fetchWithTimeout(`${apiBaseUrl}/public/my-documents?size=1`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         const myDocs = myDocsRes.ok ? (await myDocsRes.json()).totalElements ?? 0 : 0

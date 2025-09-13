@@ -58,7 +58,7 @@ export default function ChatPage() {
       // 파일명에서 코드를 추출하여 코드 기반 다운로드 API 사용
       // fileName이 "A0102-2288.md" 형태이므로 확장자를 제거
       const code = fileName.replace(/\.[^/.]+$/, '') // A0102-2288 같은 코드 추출
-      const response = await fetch(`${apiBaseUrl}/admin/files/download-by-code?code=${encodeURIComponent(code)}`, {
+      const response = await fetch(`${apiBaseUrl}/public/files/download-by-code?code=${encodeURIComponent(code)}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
