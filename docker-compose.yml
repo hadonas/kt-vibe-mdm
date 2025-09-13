@@ -99,7 +99,7 @@ services:
     container_name: mdm-frontend2
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "3000:3000"
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080/api}
     depends_on:
@@ -107,7 +107,7 @@ services:
     networks:
       - mdm-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1,5 +1,6 @@
 'use client'
 
+import { redirect } from 'next/navigation'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { 
@@ -84,7 +85,7 @@ export default function ApprovalPage() {
 
   useEffect(() => {
     if (!AuthService.isApprover()) {
-      router.push('/dashboard')
+      router.replace('/dashboard')
       return
     }
     fetchRequests()

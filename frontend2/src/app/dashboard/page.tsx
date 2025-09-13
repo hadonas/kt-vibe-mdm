@@ -1,18 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { 
-  DocumentTextIcon,
-  FolderIcon,
-  ChatBubbleLeftRightIcon,
-  ClipboardDocumentCheckIcon,
-  UserGroupIcon,
-  ChartBarIcon,
-  CogIcon,
-  ServerIcon,
-  UserIcon
+  DocumentTextIcon, FolderIcon, ChatBubbleLeftRightIcon, ClipboardDocumentCheckIcon,
+  UserGroupIcon, ChartBarIcon, CogIcon, ServerIcon, UserIcon
 } from '@heroicons/react/24/outline'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { useAuth } from '@/hooks/useAuth'
@@ -25,313 +18,156 @@ interface DashboardStats {
   myDocuments: number
 }
 
-export default function DashboardPage() {
+const DashboardPage = () => {
   console.log('🎯 DashboardPage component is executing!')
+  console.log('🎯 DashboardPage - Component function called')
+  console.log('🎯 DashboardPage - Direct access to /dashboard')
   
   // 클라이언트 사이드에서만 실행되도록 보장
-  const [mounted, setMounted] = useState(false)
-  
-  useEffect(() => {
-    setMounted(true)
-    console.log('🎯 DashboardPage mounted on client side')
-  }, [])
-  
-  const { isAuthenticated, user, token, isLoading, logout, isAdmin, isApprover } = useAuth()
+  const { hasInitialized, isAuthenticated, user, token, isLoading, logout, isAdmin, isApprover } = useAuth()
   const router = useRouter()
   const [stats, setStats] = useState<DashboardStats>({
-    pendingRequests: 0,
-    totalDocuments: 0,
-    monthlyDocuments: 0,
-    myPendingRequests: 0,
-    myDocuments: 0
+    pendingRequests: 0, totalDocuments: 0, monthlyDocuments: 0, myPendingRequests: 0, myDocuments: 0
   })
   const [statsLoading, setStatsLoading] = useState(true)
+  const lastFetchKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
-    console.log('📊 Dashboard auth state:', { 
-      isAuthenticated, 
-      user: user?.name, 
-      isLoading, 
-      token: !!token,
-      userRoles: user?.roles 
-    })
-    
-    if (!isLoading && !isAuthenticated) {
-      console.log('🔄 Redirecting to login...')
-      router.push('/login')
+    console.log('🎯 DashboardPage - hasInitialized:', hasInitialized, 'isAuthenticated:', isAuthenticated)
+    if (!hasInitialized) return; // 복원 전엔 아무 것도 하지 않음
+    if (!isAuthenticated) {
+      router.replace('/login');
     }
-  }, [isAuthenticated, isLoading, router, user, token])
+  }, [hasInitialized, isAuthenticated, router]);
 
-  // 컴포넌트가 마운트될 때 로그 추가
+  // 2) 대시보드 데이터 로드
   useEffect(() => {
-    console.log('🚀 Dashboard component mounted')
+    console.log('main useEffect - hasInitialized:', hasInitialized, 'isAuthenticated:', isAuthenticated, 'token:', token)
+    if (!hasInitialized || !isAuthenticated || !token) return
+    console.log('rendering')
+
+    const fetchKey = `${token}|${Number(isAdmin)}|${Number(isApprover)}`
+
+    // 같은 키로 이미 실행했다면 재실행하지 않음 (StrictMode 이중 실행, 미세한 리렌더 차단)
+    if (lastFetchKeyRef.current === fetchKey) {
+      return
+    }
+    lastFetchKeyRef.current = fetchKey
+  
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    const fetchWithTimeout = (url: string, options: RequestInit = {}) =>
+      fetch(url, { ...options, signal: controller.signal })
+
+    const load = async () => {
+      try {
+        setStatsLoading(true)
+        const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'
+
+        // 승인대기 개수
+        console.log('loading pendingRequests')
+        let pendingRequests = 0
+        if (isAdmin || isApprover) {
+          const r = await fetchWithTimeout(`${apiBaseUrl}/approval/requests?status=PENDING&size=1`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const j = r.ok ? await r.json() : { totalElements: 0 }
+          pendingRequests = j.totalElements ?? 0
+        } else {
+          const r = await fetchWithTimeout(`${apiBaseUrl}/approval/my-requests?status=PENDING&size=1`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const j = r.ok ? await r.json() : { totalElements: 0 }
+          pendingRequests = j.totalElements ?? 0
+        }
+
+        // 문서수
+        console.log('loading totalDocuments')
+        let totalDocuments = 0
+        if (isAdmin || isApprover) {
+          const r = await fetchWithTimeout(`${apiBaseUrl}/admin/files/hierarchy`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const j = r.ok ? await r.json() : { totalFiles: 0 }
+          totalDocuments = j.totalFiles ?? 0
+        } else {
+          const r = await fetchWithTimeout(`${apiBaseUrl}/admin/documents/count`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const j = r.ok ? await r.json() : { totalDocuments: 0 }
+          totalDocuments = j.totalDocuments ?? 0
+        }
+
+        // 내 대기 / 내 문서
+        console.log('loading myPendingRequests')
+        const myPendingRes = await fetchWithTimeout(`${apiBaseUrl}/approval/my-requests?status=PENDING&size=1`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const myPending = myPendingRes.ok ? (await myPendingRes.json()).totalElements ?? 0 : 0
+
+        console.log('loading myDocuments')
+        const myDocsRes = await fetchWithTimeout(`${apiBaseUrl}/admin/my-documents?size=1`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const myDocs = myDocsRes.ok ? (await myDocsRes.json()).totalElements ?? 0 : 0
+
+        setStats({
+          pendingRequests,
+          totalDocuments,
+          monthlyDocuments: totalDocuments, // TODO: 서버에서 month filter 제공되면 교체
+          myPendingRequests: myPending,
+          myDocuments: myDocs,
+        })
+      } catch (e) {
+        // 실패해도 안전하게 화면은 유지
+        console.error('❌ 통계 데이터 로드 실패:', e)
+      } finally {
+        setStatsLoading(false)
+      }
+    }
+
+    load()
     return () => {
-      console.log('🛑 Dashboard component unmounted')
+      clearTimeout(timeout)
     }
-  }, [])
+  }, [hasInitialized, isAuthenticated, token, isAdmin, isApprover])
 
-  // 클라이언트 사이드 라우팅 문제 해결을 위한 추가 로그
-  useEffect(() => {
-    console.log('🔄 Dashboard route change detected')
-  }, [])
-
-  // 통계 데이터 로드
-  useEffect(() => {
-    console.log('🔄 Dashboard useEffect triggered:', { isAuthenticated, token: !!token })
-    if (isAuthenticated && token) {
-      console.log('🚀 Calling loadDashboardStats...')
-      loadDashboardStats()
-    } else {
-      console.log('⏸️ Not calling loadDashboardStats - missing auth or token')
+  // 이후 렌더 (사용자 존재 가정)
+  const quickActions = useMemo(() => {
+    const base = [
+      { title: '단일 문서 등록', description: 'DOCX, XLSX, PDF 파일을 업로드하여 등록 요청', icon: DocumentTextIcon, href: '/ingest/document', color: 'bg-blue-500' },
+      { title: '레포지토리 등록', description: 'GitHub 레포지토리를 분석하여 등록 요청', icon: FolderIcon, href: '/ingest/repository', color: 'bg-green-500' },
+      { title: 'RAG 채팅', description: '등록된 문서들과 대화하며 정보 검색', icon: ChatBubbleLeftRightIcon, href: '/chat', color: 'bg-orange-500' },
+      { title: '내 요청 관리', description: '내가 제출한 등록 요청들을 확인하고 관리', icon: UserIcon, href: '/my-requests', color: 'bg-purple-500' },
+    ]
+    if (isApprover) {
+      base.push({ title: '승인 관리', description: '등록 요청 승인/반려 처리', icon: UserGroupIcon, href: '/approval', color: 'bg-red-500' })
     }
-  }, [isAuthenticated, token])
-
-  const loadDashboardStats = async () => {
-    try {
-      console.log('📊 Starting to load dashboard stats...')
-      setStatsLoading(true)
-      
-      // 대기 중인 요청 수 조회 (사용자 역할에 따라 다른 API 사용)
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'
-      console.log('API Base URL:', apiBaseUrl)
-      console.log('User roles:', user?.roles)
-      console.log('Is admin:', isAdmin, 'Is approver:', isApprover)
-      
-      // API 호출에 타임아웃 추가
-      const fetchWithTimeout = (url: string, options: RequestInit, timeout = 10000) => {
-        return Promise.race([
-          fetch(url, options),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Request timeout')), timeout)
-          )
-        ])
-      }
-      
-      let pendingRequests = 0
-      if (isAdmin || isApprover) {
-        // 관리자/승인자는 전체 대기 중인 요청 조회
-        console.log('🔍 Fetching pending requests for admin/approver...')
-        const pendingResponse = await fetchWithTimeout(`${apiBaseUrl}/approval/requests?status=PENDING&size=1`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }) as Response
-        
-        if (!pendingResponse.ok) {
-          throw new Error(`Pending requests API failed: ${pendingResponse.status}`)
-        }
-        
-        const pendingData = await pendingResponse.json()
-        pendingRequests = pendingData.totalElements || 0
-        console.log('✅ Pending requests data:', pendingData)
-      } else {
-        // 일반 사용자는 자신의 대기 중인 요청만 조회
-        console.log('🔍 Fetching my pending requests...')
-        const myPendingResponse = await fetchWithTimeout(`${apiBaseUrl}/approval/my-requests?status=PENDING&size=1`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }) as Response
-        
-        if (!myPendingResponse.ok) {
-          throw new Error(`My pending requests API failed: ${myPendingResponse.status}`)
-        }
-        
-        const myPendingData = await myPendingResponse.json()
-        pendingRequests = myPendingData.totalElements || 0
-        console.log('✅ My pending requests data:', myPendingData)
-      }
-
-      // 전체 문서 수 조회 (사용자 역할에 따라 다른 API 사용)
-      let totalDocuments = 0
-      if (isAdmin || isApprover) {
-        // 관리자/승인자는 파일 계층 구조에서 조회
-        console.log('🔍 Fetching hierarchy for admin/approver...')
-        const hierarchyResponse = await fetchWithTimeout(`${apiBaseUrl}/admin/files/hierarchy`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }) as Response
-        
-        if (!hierarchyResponse.ok) {
-          throw new Error(`Hierarchy API failed: ${hierarchyResponse.status}`)
-        }
-        
-        const hierarchyData = await hierarchyResponse.json()
-        totalDocuments = hierarchyData.totalFiles || 0
-        console.log('✅ Hierarchy data:', hierarchyData)
-      } else {
-        // 일반 사용자는 문서 수 API 사용
-        console.log('🔍 Fetching document count...')
-        const countResponse = await fetchWithTimeout(`${apiBaseUrl}/admin/documents/count`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }) as Response
-        
-        if (!countResponse.ok) {
-          throw new Error(`Document count API failed: ${countResponse.status}`)
-        }
-        
-        const countData = await countResponse.json()
-        totalDocuments = countData.totalDocuments || 0
-        console.log('✅ Document count data:', countData)
-      }
-
-      // 사용자별 데이터 조회
-      console.log('🔍 Fetching my pending requests...')
-      const myPendingResponse = await fetchWithTimeout(`${apiBaseUrl}/approval/my-requests?status=PENDING&size=1`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      }) as Response
-      
-      if (!myPendingResponse.ok) {
-        throw new Error(`My pending requests API failed: ${myPendingResponse.status}`)
-      }
-      
-      const myPendingData = await myPendingResponse.json()
-      const myPendingRequests = myPendingData.totalElements || 0
-      console.log('✅ My pending requests data:', myPendingData)
-
-      // 사용자별 문서 수 조회
-      console.log('🔍 Fetching my documents...')
-      const myDocumentsResponse = await fetchWithTimeout(`${apiBaseUrl}/admin/my-documents?size=1`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      }) as Response
-      
-      if (!myDocumentsResponse.ok) {
-        throw new Error(`My documents API failed: ${myDocumentsResponse.status}`)
-      }
-      
-      const myDocumentsData = await myDocumentsResponse.json()
-      const myDocuments = myDocumentsData.totalElements || 0
-      console.log('✅ My documents data:', myDocumentsData)
-
-      // 이번 달 문서 수 (현재는 전체 문서 수로 대체)
-      const monthlyDocuments = totalDocuments
-
-      console.log('📊 Setting final stats:', {
-        pendingRequests,
-        totalDocuments,
-        monthlyDocuments,
-        myPendingRequests,
-        myDocuments
-      })
-
-      setStats({
-        pendingRequests,
-        totalDocuments,
-        monthlyDocuments,
-        myPendingRequests,
-        myDocuments
-      })
-      
-      console.log('✅ Dashboard stats loaded successfully!')
-    } catch (error) {
-      console.error('❌ 통계 데이터 로드 실패:', error)
-    } finally {
-      console.log('🏁 Setting statsLoading to false')
-      setStatsLoading(false)
-    }
-  }
-
-  // 서버 사이드 렌더링 중이거나 클라이언트가 마운트되지 않은 경우
-  if (!mounted) {
-    console.log('⏳ Dashboard is not mounted yet (SSR)')
+    return base
+  }, [isApprover])
+  
+  // 3) 로딩/리다이렉트 UX
+  if (!hasInitialized || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">페이지를 로딩하는 중...</p>
+          <p className="mt-4 text-gray-600">인증 상태를 확인하는 중...</p>
         </div>
       </div>
     )
   }
-
-  // 로딩 중이거나 인증되지 않은 경우
-  if (isLoading || !isAuthenticated || !user) {
-    console.log('⏳ Dashboard loading state:', { isLoading, isAuthenticated, user: !!user, token: !!token })
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">
-            {isLoading ? '인증 상태를 확인하는 중...' : 
-             !isAuthenticated ? '로그인 페이지로 이동 중...' : 
-             '사용자 정보를 불러오는 중...'}
-          </p>
-          <p className="mt-2 text-sm text-gray-500">
-            Debug: isLoading={isLoading.toString()}, isAuthenticated={isAuthenticated.toString()}, user={!!user}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  console.log('✅ Dashboard ready to render for user:', user.name)
-
-  // 통계 데이터 로딩 중일 때
-  if (statsLoading) {
-    console.log('📊 Stats are loading...')
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">대시보드 데이터를 불러오는 중...</p>
-        </div>
-      </div>
-    )
-  }
-
-  const quickActions = [
-    {
-      title: '단일 문서 등록',
-      description: 'DOCX, XLSX, PDF 파일을 업로드하여 등록 요청',
-      icon: DocumentTextIcon,
-      href: '/ingest/document',
-      color: 'bg-blue-500',
-    },
-    {
-      title: '레포지토리 등록',
-      description: 'GitHub 레포지토리를 분석하여 등록 요청',
-      icon: FolderIcon,
-      href: '/ingest/repository',
-      color: 'bg-green-500',
-    },
-    {
-      title: 'RAG 채팅',
-      description: '등록된 문서들과 대화하며 정보 검색',
-      icon: ChatBubbleLeftRightIcon,
-      href: '/chat',
-      color: 'bg-orange-500',
-    },
-    {
-      title: '내 요청 관리',
-      description: '내가 제출한 등록 요청들을 확인하고 관리',
-      icon: UserIcon,
-      href: '/my-requests',
-      color: 'bg-purple-500',
-    },
-  ]
-
-  if (isApprover) {
-    quickActions.push({
-      title: '승인 관리',
-      description: '등록 요청 승인/반려 처리',
-      icon: UserGroupIcon,
-      href: '/approval',
-      color: 'bg-red-500',
-    })
+  if (!isAuthenticated) {
+    // replace가 실행될 때까지의 안전한 빈 화면
+    return null
   }
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">
-          안녕하세요, {user.name}님!
+          안녕하세요, {user?.name}님!
         </h1>
         <p className="mt-2 text-gray-600">
           문서 관리 시스템에 오신 것을 환영합니다. 
@@ -342,7 +178,7 @@ export default function DashboardPage() {
 
       {/* 통계 카드 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {isAdmin || isApprover ? (
+        {(isAdmin || isApprover) ? (
           // 관리자/승인자용 통계
           <>
             <Card>
@@ -545,3 +381,5 @@ export default function DashboardPage() {
     </div>
   )
 }
+
+export default DashboardPage

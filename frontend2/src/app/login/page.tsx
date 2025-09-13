@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import AuthService from '@/lib/auth'
+import { useAuth } from '@/hooks/useAuth'
 import { LoginRequest } from '@/types/api'
 
 export default function LoginPage() {
@@ -17,6 +17,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const router = useRouter()
+  const { login } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,13 +25,20 @@ export default function LoginPage() {
     setError('')
 
     try {
-      await AuthService.login(formData)
-      router.push('/dashboard')
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error && 'response' in error 
-        ? (error as any).response?.data?.message 
-        : '로그인에 실패했습니다.'
-      setError(errorMessage)
+      await login(formData)
+      console.log('🏠 LoginPage - 로그인 성공')
+      router.replace('/dashboard')
+    } catch (err: unknown) {
+      console.log('🏠 LoginPage - 로그인 실패')
+      let msg = '로그인에 실패했습니다.'
+      // axios 스타일
+      if (typeof err === 'object' && err && 'response' in err) {
+        // @ts-expect-error
+        msg = err.response?.data?.message ?? msg
+      } else if (err instanceof Error) {
+        msg = err.message || msg
+      }
+      setError(msg)
     } finally {
       setIsLoading(false)
     }

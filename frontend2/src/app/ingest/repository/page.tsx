@@ -1,5 +1,6 @@
 'use client'
 
+import { redirect } from 'next/navigation'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -77,7 +78,7 @@ export default function RepositoryIngestPage() {
       setSuccess('레포지토리 등록 요청이 성공적으로 제출되었습니다. 관리자의 승인을 기다려주세요.')
       
       setTimeout(() => {
-        router.push('/dashboard')
+        router.replace('/dashboard')
       }, 3000)
 
     } catch (error: unknown) {

@@ -1,5 +1,6 @@
 'use client'
 
+import { redirect } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { 
@@ -84,7 +85,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      router.push('/login')
+      router.replace('/login')
       return
     }
 

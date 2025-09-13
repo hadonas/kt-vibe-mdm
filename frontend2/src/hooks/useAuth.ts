@@ -5,75 +5,95 @@ import AuthService from '@/lib/auth'
 import { User } from '@/types/api'
 
 export function useAuth() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [hasInitialized, setHasInitialized] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false)
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [token, setToken] = useState<string | null>(null)
 
   useEffect(() => {
+    let mounted = true
+
     const checkAuth = async () => {
       try {
-        console.log('🔍 Checking authentication status...')
-        const authenticated = AuthService.isAuthenticated()
-        
-        if (authenticated) {
-          console.log('🔍 Token found, fetching user data from server...')
-          const currentToken = AuthService.getToken()
-          const currentUser = await AuthService.getCurrentUserFromServer()
-          
-          if (currentUser && currentToken) {
-            console.log('🔍 Auth check results:', { authenticated: true, user: currentUser })
-            setIsAuthenticated(true)
-            setUser(currentUser)
-            setToken(currentToken)
-          } else {
-            console.log('🔍 Failed to get user from server, clearing auth')
-            AuthService.logout()
-            setIsAuthenticated(false)
+        // 1) 로컬 토큰 동기 확인 (빠르게 화면 깜빡임 줄임)
+        const localAuthenticated = await AuthService.isAuthenticated()
+        const localToken = await AuthService.getToken()
+        if (mounted) {
+          setIsAuthenticated(localAuthenticated)
+          setToken(localToken)
+        }
+
+        if (!localAuthenticated || !localToken) {
+          if (mounted) {
             setUser(null)
+            setIsLoading(false)
+          }
+          return
+        }
+
+        // 2) 서버에서 현재 유저 조회
+        const currentUser = await AuthService.getCurrentUserFromServer()
+        if (mounted) {
+          if (currentUser) {
+            setUser(currentUser)
+            setIsAuthenticated(true)
+          } else {
+            AuthService.logout()
+            setUser(null)
+            setIsAuthenticated(false)
             setToken(null)
           }
-        } else {
-          console.log('🔍 No token found')
-          setIsAuthenticated(false)
+        }
+      } catch (e) {
+        if (mounted) {
+          AuthService.logout()
           setUser(null)
+          setIsAuthenticated(false)
           setToken(null)
         }
-        
-        setIsLoading(false)
-      } catch (error) {
-        console.error('❌ Error checking auth:', error)
-        AuthService.logout()
-        setIsAuthenticated(false)
-        setUser(null)
-        setToken(null)
-        setIsLoading(false)
+      } finally {
+        if (mounted) {
+          setIsLoading(false)
+          setHasInitialized(true)
+        }
       }
     }
 
-    // 클라이언트 사이드에서만 실행되도록 보장
-    if (typeof window !== 'undefined') {
-      checkAuth()
-    } else {
-      // 서버 사이드에서는 로딩 상태를 즉시 해제
+    checkAuth()
+    return () => { mounted = false }
+  }, [])
+
+  const login = async (credentials: { email: string; password: string }) => {
+    setIsLoading(true)
+    try {
+      const res = await AuthService.login(credentials)
+      setIsAuthenticated(true)
+      setUser(res.user)
+      setToken(res.accessToken)
+      return res
+    } finally {
       setIsLoading(false)
     }
-  }, [])
+  }
 
   const logout = () => {
     AuthService.logout()
     setIsAuthenticated(false)
     setUser(null)
     setToken(null)
+    setIsLoading(false)
   }
 
   return {
+    hasInitialized,
     isAuthenticated,
     user,
     token,
     isLoading,
+    login,
     logout,
-    isAdmin: user?.roles.includes('ADMIN') ?? false,
-    isApprover: (user?.roles.includes('APPROVER') || user?.roles.includes('ADMIN')) ?? false,
+    isAdmin: user?.roles?.includes('ADMIN') ?? false,
+    isApprover: (user?.roles?.includes('APPROVER') || user?.roles?.includes('ADMIN')) ?? false,
   }
 }

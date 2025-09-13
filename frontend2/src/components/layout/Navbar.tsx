@@ -1,5 +1,6 @@
 'use client'
 
+import { redirect } from 'next/navigation'
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -24,7 +25,7 @@ export default function Navbar() {
 
   const handleLogout = () => {
     logout()
-    router.push('/login')
+    router.replace('/login')
   }
 
   const navigation = [

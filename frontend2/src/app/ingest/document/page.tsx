@@ -1,5 +1,6 @@
 'use client'
 
+import { redirect } from 'next/navigation'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -186,7 +187,7 @@ export default function DocumentIngestPage() {
       
       // 3초 후 대시보드로 이동
       setTimeout(() => {
-        router.push('/dashboard')
+        router.replace('/dashboard')
       }, 3000)
 
     } catch (error: unknown) {

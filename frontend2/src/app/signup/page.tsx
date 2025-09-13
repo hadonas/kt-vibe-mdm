@@ -39,7 +39,7 @@ export default function SignupPage() {
 
     try {
       await AuthService.signup(formData)
-      router.push('/dashboard')
+      router.replace('/dashboard')
     } catch (error: unknown) {
       const errorMessage = error instanceof Error && 'response' in error 
         ? (error as any).response?.data?.message 
