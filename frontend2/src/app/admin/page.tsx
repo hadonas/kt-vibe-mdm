@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContexts';
 import { ArrowDownTrayIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { adminApi } from '@/lib/api';
 

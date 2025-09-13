@@ -13,7 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/contexts/AuthContexts'
 import api from '@/lib/api'
 import { ChatQueryRequest, ChatQueryResponse } from '@/types/api'
 import { formatDate } from '@/lib/utils'

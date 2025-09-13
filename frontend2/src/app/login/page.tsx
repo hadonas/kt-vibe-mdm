@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/contexts/AuthContexts'
 import { LoginRequest } from '@/types/api'
 
 export default function LoginPage() {

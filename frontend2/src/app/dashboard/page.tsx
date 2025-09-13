@@ -8,7 +8,7 @@ import {
   UserGroupIcon, ChartBarIcon, CogIcon, ServerIcon, UserIcon
 } from '@heroicons/react/24/outline'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/contexts/AuthContexts'
 
 interface DashboardStats {
   pendingRequests: number
@@ -19,10 +19,6 @@ interface DashboardStats {
 }
 
 const DashboardPage = () => {
-  console.log('🎯 DashboardPage component is executing!')
-  console.log('🎯 DashboardPage - Component function called')
-  console.log('🎯 DashboardPage - Direct access to /dashboard')
-  
   // 클라이언트 사이드에서만 실행되도록 보장
   const { hasInitialized, isAuthenticated, user, token, isLoading, logout, isAdmin, isApprover } = useAuth()
   const router = useRouter()
@@ -33,7 +29,6 @@ const DashboardPage = () => {
   const lastFetchKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
-    console.log('🎯 DashboardPage - hasInitialized:', hasInitialized, 'isAuthenticated:', isAuthenticated)
     if (!hasInitialized) return; // 복원 전엔 아무 것도 하지 않음
     if (!isAuthenticated) {
       router.replace('/login');
@@ -42,9 +37,7 @@ const DashboardPage = () => {
 
   // 2) 대시보드 데이터 로드
   useEffect(() => {
-    console.log('main useEffect - hasInitialized:', hasInitialized, 'isAuthenticated:', isAuthenticated, 'token:', token)
     if (!hasInitialized || !isAuthenticated || !token) return
-    console.log('rendering')
 
     const fetchKey = `${token}|${Number(isAdmin)}|${Number(isApprover)}`
 
@@ -66,7 +59,6 @@ const DashboardPage = () => {
         const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api'
 
         // 승인대기 개수
-        console.log('loading pendingRequests')
         let pendingRequests = 0
         if (isAdmin || isApprover) {
           const r = await fetchWithTimeout(`${apiBaseUrl}/approval/requests?status=PENDING&size=1`, {
@@ -83,7 +75,6 @@ const DashboardPage = () => {
         }
 
         // 문서수
-        console.log('loading totalDocuments')
         let totalDocuments = 0
         if (isAdmin || isApprover) {
           const r = await fetchWithTimeout(`${apiBaseUrl}/admin/files/hierarchy`, {
@@ -100,13 +91,11 @@ const DashboardPage = () => {
         }
 
         // 내 대기 / 내 문서
-        console.log('loading myPendingRequests')
         const myPendingRes = await fetchWithTimeout(`${apiBaseUrl}/approval/my-requests?status=PENDING&size=1`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         const myPending = myPendingRes.ok ? (await myPendingRes.json()).totalElements ?? 0 : 0
 
-        console.log('loading myDocuments')
         const myDocsRes = await fetchWithTimeout(`${apiBaseUrl}/admin/my-documents?size=1`, {
           headers: { Authorization: `Bearer ${token}` },
         })
@@ -146,7 +135,7 @@ const DashboardPage = () => {
     }
     return base
   }, [isApprover])
-  
+
   // 3) 로딩/리다이렉트 UX
   if (!hasInitialized || isLoading) {
     return (

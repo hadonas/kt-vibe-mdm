@@ -1,6 +1,6 @@
 'use client'
 
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/contexts/AuthContexts'
 import AuthService from '@/lib/auth'
 
 export default function DebugPage() {

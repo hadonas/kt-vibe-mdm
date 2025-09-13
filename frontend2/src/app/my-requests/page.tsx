@@ -11,7 +11,7 @@ import {
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/contexts/AuthContexts'
 
 interface IngestRequest {
   id: string

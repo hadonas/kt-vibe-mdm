@@ -1,6 +1,5 @@
 'use client'
 
-import { redirect } from 'next/navigation'
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -16,7 +15,7 @@ import {
   UserIcon
 } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/Button'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/contexts/AuthContexts'
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
