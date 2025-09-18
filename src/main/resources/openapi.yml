@@ -5,16 +5,13 @@ info:
     모놀리식 문서 관리 시스템 API
     
     현재 구현된 기능:
-    - JWT 기반 인증 시스템 (회원가입, 로그인, 비밀번호 재설정)
-    - 문서 수집 시스템 (단일 등록, 벌크 등록, 재등록)
-    - 레포지토리 분석 및 문서 추출
-    - 승인 워크플로우 (승인 대기 중)
-    
-    계획된 기능:
-    - 승인 관리 시스템
-    - 카탈로그 관리
-    - 문서 검색 및 RAG 채팅
-    - 파일 업로드 및 관리
+    - JWT 기반 인증 시스템 (회원가입, 로그인, 비밀번호 재설정, 사용자 정보 조회)
+    - 문서 수집 시스템 (개별 등록, 재등록)
+    - 파일 관리 시스템 (업로드, 다운로드, 분석)
+    - 승인 워크플로우 (승인 요청 조회, 승인/반려 결정, 통계)
+    - 문서 관리 (문서 목록, 계층 구조, 카테고리별 조회, 중복 검사)
+    - 검색 및 채팅 (벡터 인덱스 재구성, RAG 채팅)
+    - 공개 API (문서 수 조회, 파일 다운로드, 사용자별 문서 조회)
   version: 1.0.0
   contact:
     name: MDM Team
@@ -216,100 +213,403 @@ paths:
                   error:
                     type: string
 
-  # 미구현 API들 - 계획된 기능
+  # Authentication - 추가 엔드포인트
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: 현재 사용자 정보 조회
+      responses:
+        '200':
+          description: 사용자 정보 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: 인증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Public API - 공개 엔드포인트
+  /public/documents/count:
+    get:
+      tags: [Public]
+      summary: 전체 문서 수 조회
+      security: []
+      responses:
+        '200':
+          description: 문서 수 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalDocuments:
+                    type: integer
+                    example: 150
+
+  /public/files/download-by-code:
+    get:
+      tags: [Public]
+      summary: 코드로 파일 다운로드
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "A0101-001"
+      responses:
+        '200':
+          description: 파일 다운로드 성공
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: 파일을 찾을 수 없음
+
+  /public/files/download:
+    get:
+      tags: [Public]
+      summary: 파일 다운로드
+      security: []
+      parameters:
+        - name: filePath
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "documents/A0101-001.pdf"
+      responses:
+        '200':
+          description: 파일 다운로드 성공
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /public/my-documents:
+    get:
+      tags: [Public]
+      summary: 사용자별 문서 조회
+      security: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 사용자 문서 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Document'
+                  totalElements:
+                    type: integer
+                  totalPages:
+                    type: integer
+                  currentPage:
+                    type: integer
+
+  # Admin API - 관리자 전용 엔드포인트
+  /admin/documents:
+    get:
+      tags: [Admin]
+      summary: 모든 문서 목록 조회
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 문서 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Document'
+                  totalElements:
+                    type: integer
+                  totalPages:
+                    type: integer
+                  currentPage:
+                    type: integer
+
+  /admin/documents/hierarchy:
+    get:
+      tags: [Admin]
+      summary: 문서 계층 구조 조회
+      responses:
+        '200':
+          description: 계층 구조 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /admin/documents/duplicates:
+    get:
+      tags: [Admin]
+      summary: 중복 문서 조회
+      responses:
+        '200':
+          description: 중복 문서 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # Approval API - 승인 관리
   /approval/requests:
     get:
-      tags: [Approval - Planned]
-      summary: 승인 요청 목록 조회 (미구현)
-      description: "계획된 기능: 관리자가 승인 대기 중인 요청들을 조회"
+      tags: [Approval]
+      summary: 승인 요청 목록 조회
       parameters:
         - name: status
           in: query
           schema:
             type: string
             enum: [PENDING, APPROVED, REJECTED, IMPORTED]
-        - name: owner
+        - name: page
           in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 승인 요청 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /approval/requests/{id}:
+    get:
+      tags: [Approval]
+      summary: 승인 요청 상세 조회
+      parameters:
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
       responses:
-        '501':
-          description: 미구현 기능
+        '200':
+          description: 승인 요청 상세 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
 
   /approval/requests/{id}/decide:
     post:
-      tags: [Approval - Planned]
-      summary: 승인/반려 결정 (미구현)
-      description: "계획된 기능: 관리자가 등록 요청을 승인하거나 반려"
+      tags: [Approval]
+      summary: 승인/반려 결정
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decision:
+                  type: string
+                  enum: [APPROVE, REJECT]
+                comment:
+                  type: string
+              required: [decision]
       responses:
-        '501':
-          description: 미구현 기능
+        '200':
+          description: 승인/반려 결정 완료
+          content:
+            application/json:
+              schema:
+                type: object
 
-  /catalog/tree:
+  /approval/my-requests:
     get:
-      tags: [Catalog - Planned]
-      summary: 카탈로그 트리 조회 (미구현)
-      description: "계획된 기능: 대분류-중분류-소분류 카탈로그 구조 조회"
-      responses:
-        '501':
-          description: 미구현 기능
-
-  /documents/{id}:
-    get:
-      tags: [Document - Planned]
-      summary: 문서 상세 조회 (미구현)
-      description: "계획된 기능: 등록된 문서의 상세 정보 조회"
+      tags: [Approval]
+      summary: 사용자별 승인 요청 조회
       parameters:
-        - name: id
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 사용자 승인 요청 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /approval/stats:
+    get:
+      tags: [Approval]
+      summary: 승인 요청 통계 조회
+      responses:
+        '200':
+          description: 승인 통계 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # File API - 파일 관리
+  /files/analyze:
+    post:
+      tags: [File]
+      summary: 파일 분석 (카테고리 및 목적 추출)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        '200':
+          description: 파일 분석 완료
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /files/upload:
+    post:
+      tags: [File]
+      summary: 파일 업로드
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        '200':
+          description: 파일 업로드 성공
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /files/download/{fileId}:
+    get:
+      tags: [File]
+      summary: 파일 다운로드
+      parameters:
+        - name: fileId
           in: path
           required: true
           schema:
             type: string
       responses:
-        '501':
-          description: 미구현 기능
+        '200':
+          description: 파일 다운로드 성공
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
 
-  /search/similar:
+  # Search API - 검색
+  /search/reindex:
     post:
-      tags: [Search - Planned]
-      summary: 유사 문서 검색 (미구현)
-      description: "계획된 기능: 벡터 검색을 통한 유사 문서 찾기"
+      tags: [Search]
+      summary: 벡터 인덱스 재구성
       responses:
-        '501':
-          description: 미구현 기능
+        '200':
+          description: 인덱스 재구성 완료
+          content:
+            application/json:
+              schema:
+                type: object
 
-  /search/query:
-    post:
-      tags: [Search - Planned]
-      summary: 하이브리드 검색 (미구현)
-      description: "계획된 기능: 벡터 + 키워드 하이브리드 검색"
-      responses:
-        '501':
-          description: 미구현 기능
-
+  # Chat API - 채팅
   /chat/query:
     post:
-      tags: [Chat - Planned]
-      summary: RAG 챗봇 질의 (미구현)
-      description: "계획된 기능: 등록된 문서 기반 RAG 채팅"
+      tags: [Chat]
+      summary: RAG 채팅 쿼리
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                  example: "React 프로젝트에 대해 알려주세요"
+              required: [query]
       responses:
-        '501':
-          description: 미구현 기능
-
-  /files/presign:
-    post:
-      tags: [File - Planned]
-      summary: 파일 업로드 URL 생성 (미구현)
-      description: "계획된 기능: S3 presigned URL 생성"
-      responses:
-        '501':
-          description: 미구현 기능
+        '200':
+          description: 채팅 응답 생성 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  sources:
+                    type: array
+                    items:
+                      type: object
 
 components:
   securitySchemes:
@@ -530,6 +830,45 @@ components:
         snippet:
           type: string
           example: "React를 사용한 관리자 대시보드 개발..."
+
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "507f1f77bcf86cd799439011"
+        serial:
+          type: string
+          example: "A0101-001"
+        title:
+          type: string
+          example: "React 프로젝트 계획서"
+        purpose:
+          type: string
+          example: "웹 애플리케이션 개발"
+        category:
+          $ref: '#/components/schemas/Category'
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, IMPORTED]
+          example: "APPROVED"
+        ownerId:
+          type: string
+          example: "507f1f77bcf86cd799439011"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        filePath:
+          type: string
+          example: "documents/A0101-001.pdf"
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["react", "web", "frontend"]
 
     ErrorResponse:
       type: object

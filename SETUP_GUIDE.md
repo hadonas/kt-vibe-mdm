@@ -24,6 +24,7 @@ cd frontend2
 cp env.example .env.local
 
 # 기본값으로도 작동하지만, 필요에 따라 API URL 변경 가능
+# NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
 ```
 
 ### 2. Docker Compose로 전체 시스템 실행
@@ -40,7 +41,7 @@ docker-compose up -d
 
 - **프론트엔드**: http://localhost:3000
 - **백엔드 API**: http://localhost:8080/api
-- **API 문서**: http://localhost:8080/api/swagger-ui.html (구현 시)
+- **API 문서**: http://localhost:8080/api/swagger-ui.html
 
 ## 🔧 개발 환경 설정
 
@@ -61,8 +62,11 @@ npm run dev
 ```bash
 # 1. MongoDB 로컬 설치 및 실행
 # 2. 백엔드 Spring Boot 애플리케이션 실행
+./gradlew bootRun
+
 # 3. 프론트엔드 Next.js 개발 서버 실행
 cd frontend2
+npm install
 npm run dev
 ```
 
@@ -71,7 +75,7 @@ npm run dev
 ### Docker Compose 환경에서의 네트워크
 
 ```
-브라우저 → http://localhost:3000 → Nginx (Frontend Container)
+브라우저 → http://localhost:3000 → Next.js (Frontend Container)
 브라우저 → http://localhost:8080/api → Spring Boot (Backend Container)
 
 Container 간 통신:
@@ -111,9 +115,9 @@ Backend Container → mongodb://mongodb:27017 → MongoDB Container
    # 자동 테스트 스크립트 실행
    ./test-connection.sh
    
-   # 수동 테스트
-   curl http://localhost:8080/api/actuator/health
-   curl http://localhost:3000/health
+# 수동 테스트
+curl http://localhost:8080/api/actuator/health
+curl http://localhost:3000
    ```
 
 4. **포트 충돌 확인**
@@ -170,6 +174,18 @@ docker-compose up -d
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8080/api` | 백엔드 API URL |
 | `NODE_ENV` | `development` | 개발/프로덕션 환경 |
 
+### API 엔드포인트 구조
+
+| 카테고리 | 경로 | 설명 | 인증 필요 |
+|----------|------|------|-----------|
+| **인증** | `/api/auth/*` | 회원가입, 로그인, 사용자 정보 | 선택적 |
+| **공개** | `/api/public/*` | 문서 수 조회, 파일 다운로드 | 선택적 |
+| **관리자** | `/api/admin/*` | 문서 관리, 계층 구조 조회 | ADMIN 권한 |
+| **승인** | `/api/approval/*` | 승인 요청 관리 | APPROVER/ADMIN 권한 |
+| **파일** | `/api/files/*` | 파일 업로드, 분석, 다운로드 | 필요 |
+| **검색** | `/api/search/*` | 벡터 검색, 인덱스 관리 | 필요 |
+| **채팅** | `/api/chat/*` | RAG 채팅 | 필요 |
+
 ## 🔒 보안 설정
 
 ### 프로덕션 환경에서 반드시 변경해야 할 값들
@@ -194,7 +210,7 @@ openssl rand -base64 32
 ### 헬스체크 엔드포인트
 
 - **백엔드**: http://localhost:8080/api/actuator/health
-- **프론트엔드**: http://localhost:3000/health
+- **프론트엔드**: http://localhost:3000 (Next.js 기본 페이지)
 
 ### 로그 모니터링
 

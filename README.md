@@ -1,6 +1,6 @@
 # MDM (Monolithic Document Management)
 
-모놀리식 문서 관리 시스템 POC - Spring Boot + Vue + MongoDB Atlas/Vector Search
+모놀리식 문서 관리 시스템 POC - Spring Boot + Next.js + MongoDB Atlas/Vector Search
 
 ## 🎯 프로젝트 개요
 
@@ -36,12 +36,12 @@ com.company.app
 
 **Java 17** 기반으로 구축되었습니다.
 
-### 프론트엔드 (Vue 3)
-- **Vue 3** + **TypeScript** + **Vite**
-- **Pinia** (상태 관리)
-- **Vue Router** (라우팅)
+### 프론트엔드 (Next.js)
+- **Next.js 14** + **TypeScript** + **React 18**
+- **App Router** (라우팅)
 - **Tailwind CSS** (스타일링)
 - **Axios** (HTTP 클라이언트)
+- **Docker** (컨테이너화)
 
 ### 데이터베이스
 - **MongoDB Atlas** (문서 저장)
@@ -95,7 +95,7 @@ java -jar build/libs/mdm-0.0.1-SNAPSHOT.jar
 #### 프론트엔드 실행
 
 ```bash
-cd frontend
+cd frontend2
 
 # 의존성 설치
 npm install
@@ -116,8 +116,8 @@ npm run build
 
 ### 5. 기본 계정
 
-- **이메일**: admin@company.com
-- **비밀번호**: admin123
+- **이메일**: admin@test.com
+- **비밀번호**: admin123456
 
 ## 📊 데이터 모델
 
@@ -207,28 +207,47 @@ ADMIN_EMAIL=admin@company.com
 
 ### 주요 엔드포인트
 
-#### 인증
+#### 인증 (Authentication)
 - `POST /api/auth/signup` - 회원가입
 - `POST /api/auth/login` - 로그인
 - `POST /api/auth/password/forgot` - 비밀번호 재설정
+- `GET /api/auth/me` - 현재 사용자 정보 조회
 
-#### 문서 수집
-- `POST /api/ingest/single` - 개별 등록
-- `POST /api/ingest/bulk` - 벌크 등록
-- `POST /api/ingest/{id}/resubmit` - 재등록
+#### 공개 API (Public)
+- `GET /api/public/documents/count` - 전체 문서 수 조회
+- `GET /api/public/files/download-by-code` - 코드로 파일 다운로드
+- `GET /api/public/files/download` - 파일 다운로드
+- `GET /api/public/my-documents` - 사용자별 문서 조회
 
-#### 레포지토리
-- `POST /api/repo/overview` - 레포지토리 개요 생성
-- `POST /api/repo/ingest` - 레포지토리 등록
+#### 관리자 API (Admin)
+- `GET /api/admin/documents` - 모든 문서 목록 조회
+- `GET /api/admin/documents/hierarchy` - 문서 계층 구조 조회
+- `GET /api/admin/documents/codes` - 코드별 문서 조회
+- `GET /api/admin/documents/category/{majorCode}/{midCode}/{subCode}` - 카테고리별 문서 조회
+- `GET /api/admin/files/hierarchy` - 파일 계층 구조 조회
+- `GET /api/admin/files/category/{majorCode}/{midCode}/{subCode}` - 카테고리별 파일 조회
+- `DELETE /api/admin/documents/{code}` - 문서 삭제
+- `GET /api/admin/documents/duplicates` - 중복 문서 조회
 
-#### 승인
-- `GET /api/approval/requests` - 승인 요청 목록
-- `POST /api/approval/requests/{id}/decide` - 승인/반려
+#### 승인 관리 (Approval)
+- `GET /api/approval/requests` - 승인 요청 목록 조회
+- `GET /api/approval/requests/{id}` - 승인 요청 상세 조회
+- `POST /api/approval/requests/{id}/decide` - 승인/반려 결정
+- `GET /api/approval/my-requests` - 사용자별 승인 요청 조회
+- `GET /api/approval/stats` - 승인 요청 통계 조회
 
-#### 검색
-- `POST /api/search/similar` - 유사 문서 검색
-- `POST /api/search/query` - 하이브리드 검색
-- `POST /api/chat/query` - RAG 챗봇
+#### 문서 수집 (Ingest)
+- `POST /api/ingest/single` - 개별 등록 (레포 URL 또는 파일)
+- `POST /api/ingest/{id}/resubmit` - 재등록/수정 (버전업)
+
+#### 파일 관리 (File)
+- `POST /api/files/analyze` - 파일 분석 (카테고리 및 목적 추출)
+- `POST /api/files/upload` - 파일 업로드
+- `GET /api/files/download/{fileId}` - 파일 다운로드
+
+#### 검색 및 채팅 (Search & Chat)
+- `POST /api/search/reindex` - 벡터 인덱스 재구성
+- `POST /api/chat/query` - RAG 채팅 쿼리
 
 자세한 API 문서는 Swagger UI에서 확인할 수 있습니다.
 
@@ -250,16 +269,16 @@ ADMIN_EMAIL=admin@company.com
 ### 프론트엔드 테스트
 
 ```bash
-cd frontend
-
-# 단위 테스트
-npm run test:unit
-
-# E2E 테스트
-npm run test:e2e
+cd frontend2
 
 # 린팅
 npm run lint
+
+# 타입 체크
+npm run type-check
+
+# 빌드 테스트
+npm run build
 ```
 
 ## 🚀 배포
@@ -271,7 +290,7 @@ npm run lint
 docker build -f Dockerfile.backend -t mdm-backend .
 
 # 프론트엔드
-docker build -f frontend/Dockerfile -t mdm-frontend ./frontend
+docker build -f frontend2/Dockerfile -t mdm-frontend ./frontend2
 ```
 
 ### Kubernetes 배포
