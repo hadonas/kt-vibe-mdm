@@ -59,6 +59,15 @@ export interface Category {
   midName: string
   subCode: string
   subName: string
+  fullCode?: string // 가변 계층 지원을 위한 전체 코드
+  fullName?: string // 가변 계층 지원을 위한 전체 이름
+  hierarchy?: CategoryLevel[] // 계층 구조 정보
+}
+
+export interface CategoryLevel {
+  level: number
+  code: string
+  name: string
 }
 
 export interface SimilarCandidate {

@@ -1,6 +1,7 @@
 package com.company.app.ingest.service;
 
 import com.company.app.common.dto.Category;
+import com.company.app.catalog.service.SmartClassificationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -14,12 +15,15 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
+import org.eclipse.jgit.transport.HttpTransport;
+import org.eclipse.jgit.transport.http.JDKHttpConnectionFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Comparator;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
@@ -31,6 +35,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class RepositoryAnalysisService {
     
+    private final SmartClassificationService smartClassificationService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     
     private final WebClient.Builder webClientBuilder;
@@ -108,23 +113,153 @@ public class RepositoryAnalysisService {
     }
     
     private Git cloneRepository(String repoUrl, String accessToken, Path tempPath) throws GitAPIException {
-        CloneCommand cloneCommand = Git.cloneRepository()
-            .setURI(repoUrl)
-            .setDirectory(tempPath.toFile());
-            
+        // SSL 인증서 문제 해결을 위한 시스템 프로퍼티 설정
+        System.setProperty("com.sun.net.ssl.checkRevocation", "false");
+        System.setProperty("trust_all_cert", "true");
+        System.setProperty("https.protocols", "TLSv1.2,TLSv1.3");
+        
+        // GitHub API를 통해 기본 브랜치 조회
+        String defaultBranch = getDefaultBranchFromGitHubAPI(repoUrl, accessToken);
+        
+        // 브랜치 후보들 (API 조회 결과 우선, 그 다음 일반적인 후보들)
+        List<String> branchCandidates = new ArrayList<>();
+        if (defaultBranch != null) {
+            branchCandidates.add(defaultBranch);
+        }
+        branchCandidates.addAll(Arrays.asList("main", "master", "develop", "dev"));
+        
+        // 중복 제거
+        branchCandidates = branchCandidates.stream().distinct().collect(Collectors.toList());
+        
+        UsernamePasswordCredentialsProvider credentialsProvider = null;
         if (accessToken != null && !accessToken.trim().isEmpty()) {
             // GitHub의 경우 토큰을 사용한 인증
             if (repoUrl.contains("github.com")) {
-                // GitHub Personal Access Token을 사용한 인증
-                UsernamePasswordCredentialsProvider credentialsProvider = 
-                    new UsernamePasswordCredentialsProvider(accessToken, "");
-                cloneCommand.setCredentialsProvider(credentialsProvider);
+                credentialsProvider = new UsernamePasswordCredentialsProvider(accessToken, "");
             }
         }
         
-        return cloneCommand.call();
+        // 각 브랜치 후보로 clone 시도
+        for (String branch : branchCandidates) {
+            try {
+                log.info("브랜치 {} 클론 시도: {}", branch, repoUrl);
+                
+                CloneCommand cloneCommand = Git.cloneRepository()
+                    .setURI(repoUrl)
+                    .setDirectory(tempPath.toFile())
+                    .setCloneAllBranches(false)
+                    .setBranch("refs/heads/" + branch)
+                    .setDepth(1); // shallow clone으로 최신 커밋만
+                
+                if (credentialsProvider != null) {
+                    cloneCommand.setCredentialsProvider(credentialsProvider);
+                }
+                
+                Git git = cloneCommand.call();
+                log.info("브랜치 {} 클론 성공: {}", branch, repoUrl);
+                return git;
+                
+            } catch (GitAPIException e) {
+                log.warn("브랜치 {} 클론 실패: {} - {}", branch, repoUrl, e.getMessage());
+                
+                // 디렉토리 정리 (다음 시도를 위해)
+                try {
+                    if (Files.exists(tempPath)) {
+                        Files.walk(tempPath)
+                            .sorted(Comparator.reverseOrder())
+                            .map(Path::toFile)
+                            .forEach(File::delete);
+                    }
+                    Files.createDirectories(tempPath);
+                } catch (Exception cleanupException) {
+                    log.debug("임시 디렉토리 정리 실패: {}", cleanupException.getMessage());
+                }
+            }
+        }
+        
+        // 모든 브랜치 시도 실패 시 기본 클론 시도 (브랜치 지정 없이)
+        try {
+            log.info("기본 브랜치로 클론 시도: {}", repoUrl);
+            
+            CloneCommand cloneCommand = Git.cloneRepository()
+                .setURI(repoUrl)
+                .setDirectory(tempPath.toFile())
+                .setCloneAllBranches(false)
+                .setDepth(1);
+            
+            if (credentialsProvider != null) {
+                cloneCommand.setCredentialsProvider(credentialsProvider);
+            }
+            
+            Git git = cloneCommand.call();
+            log.info("기본 브랜치 클론 성공: {}", repoUrl);
+            return git;
+            
+        } catch (GitAPIException e) {
+            log.error("모든 클론 시도 실패: {}", repoUrl, e);
+            throw e;
+        }
     }
     
+    /**
+     * GitHub API를 통해 기본 브랜치 조회
+     */
+    private String getDefaultBranchFromGitHubAPI(String repoUrl, String accessToken) {
+        try {
+            // GitHub URL에서 owner/repo 추출
+            if (!repoUrl.contains("github.com")) {
+                log.debug("GitHub 레포지토리가 아님, API 조회 생략: {}", repoUrl);
+                return null;
+            }
+            
+            String[] urlParts = repoUrl.replace("https://github.com/", "").replace(".git", "").split("/");
+            if (urlParts.length < 2) {
+                log.warn("GitHub URL 형식이 올바르지 않음: {}", repoUrl);
+                return null;
+            }
+            
+            String owner = urlParts[0];
+            String repo = urlParts[1];
+            String apiUrl = String.format("https://api.github.com/repos/%s/%s", owner, repo);
+            
+            log.info("GitHub API로 기본 브랜치 조회: {}", apiUrl);
+            
+            // WebClient를 사용해서 GitHub API 호출
+            WebClient.Builder webClientBuilder = WebClient.builder()
+                .defaultHeader("Accept", "application/vnd.github.v3+json")
+                .defaultHeader("User-Agent", "MDM-Repository-Analyzer/1.0");
+            
+            // 액세스 토큰이 있으면 인증 헤더 추가
+            if (accessToken != null && !accessToken.trim().isEmpty()) {
+                webClientBuilder.defaultHeader("Authorization", "Bearer " + accessToken);
+            }
+            
+            WebClient webClient = webClientBuilder.build();
+            
+            String response = webClient.get()
+                .uri(apiUrl)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+            
+            if (response != null) {
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode jsonNode = mapper.readTree(response);
+                String defaultBranch = jsonNode.path("default_branch").asText();
+                
+                if (!defaultBranch.isEmpty()) {
+                    log.info("GitHub API로 기본 브랜치 조회 성공: {} -> {}", repoUrl, defaultBranch);
+                    return defaultBranch;
+                }
+            }
+            
+        } catch (Exception e) {
+            log.warn("GitHub API로 기본 브랜치 조회 실패: {} - {}", repoUrl, e.getMessage());
+        }
+        
+        return null;
+    }
+
     private CodeAnalysisResult analyzeCodeStructure(Git git) throws IOException {
         Repository repository = git.getRepository();
         List<CodeFile> codeFiles = new ArrayList<>();
@@ -294,6 +429,73 @@ public class RepositoryAnalysisService {
     }
     
     private Category determineCategory(CodeAnalysisResult codeAnalysis, ProjectConfig projectConfig) {
+        try {
+            // 스마트 분류 시스템 사용
+            log.info("스마트 분류 시스템을 사용한 카테고리 결정 시작");
+            
+            // 프로젝트 요약 생성
+            String projectSummary = buildProjectSummary(codeAnalysis, projectConfig);
+            String projectTitle = "Repository Analysis Project";
+            
+            // 스마트 분류 실행
+            SmartClassificationService.ClassificationResult result = 
+                smartClassificationService.classifyDocument(projectSummary, projectTitle);
+            
+            if (result.isSuccessful()) {
+                log.info("스마트 분류 성공: {} (신뢰도: {:.3f})", 
+                    result.getSelectedCategory().getFullCode(), result.getConfidence());
+                return result.getSelectedCategory();
+            } else {
+                log.warn("스마트 분류 실패, 기존 방식으로 fallback: {}", result.getReason());
+                return determineCategoryFallback(codeAnalysis, projectConfig);
+            }
+            
+        } catch (Exception e) {
+            log.error("스마트 분류 중 오류, 기존 방식으로 fallback", e);
+            return determineCategoryFallback(codeAnalysis, projectConfig);
+        }
+    }
+    
+    /**
+     * 프로젝트 요약 생성 (스마트 분류용)
+     */
+    private String buildProjectSummary(CodeAnalysisResult codeAnalysis, ProjectConfig projectConfig) {
+        StringBuilder summary = new StringBuilder();
+        
+        // 프로젝트 기본 정보
+        summary.append("리포지토리 코드 분석 결과\n");
+        
+        // 기술 스택
+        if (projectConfig.getTechStack() != null && !projectConfig.getTechStack().isEmpty()) {
+            summary.append("기술 스택: ").append(String.join(", ", projectConfig.getTechStack())).append("\n");
+        }
+        
+        // 프레임워크
+        if (codeAnalysis.getFrameworks() != null && !codeAnalysis.getFrameworks().isEmpty()) {
+            summary.append("프레임워크: ").append(String.join(", ", codeAnalysis.getFrameworks())).append("\n");
+        }
+        
+        // 언어 통계
+        if (codeAnalysis.getLanguageStats() != null && !codeAnalysis.getLanguageStats().isEmpty()) {
+            summary.append("사용 언어: ");
+            codeAnalysis.getLanguageStats().entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(5)
+                .forEach(entry -> summary.append(entry.getKey()).append("(").append(entry.getValue()).append("줄), "));
+            summary.append("\n");
+        }
+        
+        // 파일 및 라인 통계
+        summary.append("총 파일 수: ").append(codeAnalysis.getTotalFiles()).append("\n");
+        summary.append("총 라인 수: ").append(codeAnalysis.getTotalLines()).append("\n");
+        
+        return summary.toString().trim();
+    }
+    
+    /**
+     * 기존 방식 카테고리 결정 (Fallback)
+     */
+    private Category determineCategoryFallback(CodeAnalysisResult codeAnalysis, ProjectConfig projectConfig) {
         // 기술 스택과 프레임워크를 기반으로 카테고리 결정
         Set<String> allTech = new HashSet<>(projectConfig.getTechStack());
         allTech.addAll(codeAnalysis.getFrameworks());
@@ -763,6 +965,7 @@ public class RepositoryAnalysisService {
         return RepositoryAnalysisResult.builder()
             .extractedText("레포지토리 분석 중 오류가 발생했습니다. 기본 정보만 제공됩니다.")
             .proposedCategory(new Category("A", "소프트웨어", "A01", "웹개발", "A0101", "프론트엔드"))
+            .proposedTitle("소프트웨어 프로젝트")
             .proposedPurpose("소프트웨어 개발 프로젝트")
             .expectedEffects("프로젝트의 구체적인 효과는 추가 분석이 필요합니다.")
             .techStack(Set.of("Unknown"))
