@@ -3,20 +3,27 @@ FROM eclipse-temurin:17-jdk as builder
 
 WORKDIR /app
 
-# Copy gradle wrapper files
-COPY gradlew .
-COPY gradle gradle
+# Install Gradle
+RUN apt-get update && \
+    apt-get install -y wget unzip && \
+    wget https://services.gradle.org/distributions/gradle-8.5-bin.zip && \
+    unzip gradle-8.5-bin.zip && \
+    mv gradle-8.5 /opt/gradle && \
+    rm gradle-8.5-bin.zip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/gradle/bin:${PATH}"
+
+# Copy build files
 COPY build.gradle .
 COPY settings.gradle .
-
-# Make gradlew executable
-RUN chmod +x gradlew
 
 # Copy source code
 COPY src src
 
 # Build application
-RUN ./gradlew build -x test --no-daemon
+RUN gradle build -x test --no-daemon
 
 # Runtime stage
 FROM eclipse-temurin:17-jre
