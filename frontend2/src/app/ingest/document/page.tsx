@@ -12,6 +12,27 @@ import { PresignRequest, SingleIngestRequest, Category } from '@/types/api'
 import { mockApi } from '@/lib/mock-api'
 import { isApiImplemented } from '@/lib/api-status'
 
+// 가변 계층 카테고리 표시를 위한 유틸리티 함수
+const formatCategoryHierarchy = (category: Category | undefined): string => {
+  if (!category) return '분류 없음';
+  
+  // 새로운 가변 계층 형식이 있는 경우
+  if (category.hierarchy && Array.isArray(category.hierarchy)) {
+    return category.hierarchy
+      .sort((a: any, b: any) => a.level - b.level)
+      .map((level: any) => level.name)
+      .join(' > ');
+  }
+  
+  // 기존 3단계 형식 fallback
+  const parts = [];
+  if (category.majorName) parts.push(category.majorName);
+  if (category.midName && category.midName !== category.majorName) parts.push(category.midName);
+  if (category.subName && category.subName !== category.midName) parts.push(category.subName);
+  
+  return parts.length > 0 ? parts.join(' > ') : '분류 없음';
+};
+
 export default function DocumentIngestPage() {
   const [files, setFiles] = useState<File[]>([])
   const [purpose, setPurpose] = useState('')
@@ -267,7 +288,7 @@ export default function DocumentIngestPage() {
                     <div>
                       <span className="font-medium text-green-700">제안된 카테고리:</span>
                       <span className="ml-2 text-green-600">
-                        {analysisResult.proposedCategory.majorName} &gt; {analysisResult.proposedCategory.midName} &gt; {analysisResult.proposedCategory.subName}
+                        {formatCategoryHierarchy(analysisResult.proposedCategory)}
                       </span>
                     </div>
                   )}

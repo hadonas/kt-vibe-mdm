@@ -60,7 +60,7 @@ public class AdminController {
     }
     
     /**
-     * 문서 분류별 계층 구조 조회
+     * 문서 분류별 계층 구조 조회 (가변 계층 지원)
      */
     @GetMapping("/documents/hierarchy")
     @PreAuthorize("hasRole('ADMIN')")
@@ -71,70 +71,62 @@ public class AdminController {
             // 1. 모든 문서 조회
             List<DocumentEntity> allDocuments = documentRepository.findAll();
             
-            // 2. 카테고리별로 그룹화
-            Map<String, Map<String, Map<String, List<DocumentEntity>>>> hierarchy = 
-                allDocuments.stream()
-                    .filter(doc -> doc.getCategory() != null)
-                    .collect(Collectors.groupingBy(
-                        doc -> doc.getCategory().getMajorName(),
-                        Collectors.groupingBy(
-                            doc -> doc.getCategory().getMidName(),
-                            Collectors.groupingBy(
-                                doc -> doc.getCategory().getSubName()
-                            )
-                        )
-                    ));
+            // 2. 가변 계층 구조로 그룹화
+            Map<String, List<DocumentEntity>> documentsByCategory = allDocuments.stream()
+                .filter(doc -> doc.getCategory() != null)
+                .collect(Collectors.groupingBy(doc -> {
+                    // fullCode 우선, 없으면 기존 3레벨 코드 사용
+                    if (doc.getCategory().getFullCode() != null) {
+                        return doc.getCategory().getFullCode();
+                    } else {
+                        return doc.getCategory().getMajorCode() + "-" + 
+                               doc.getCategory().getMidCode() + "-" + 
+                               doc.getCategory().getSubCode();
+                    }
+                }));
             
-            // 3. 계층 구조 생성
-            List<Map<String, Object>> hierarchyData = hierarchy.entrySet().stream()
-                .map(majorEntry -> {
-                    Map<String, Object> major = new HashMap<>();
-                    major.put("name", majorEntry.getKey());
-                    major.put("code", majorEntry.getValue().values().iterator().next().values().iterator().next().get(0).getCategory().getMajorCode());
-                    major.put("count", majorEntry.getValue().values().stream()
-                        .mapToInt(midMap -> midMap.values().stream()
-                            .mapToInt(List::size)
-                            .sum())
-                        .sum());
+            // 3. 계층 구조 데이터 생성
+            List<Map<String, Object>> hierarchyData = new ArrayList<>();
+            
+            for (Map.Entry<String, List<DocumentEntity>> entry : documentsByCategory.entrySet()) {
+                String categoryCode = entry.getKey();
+                List<DocumentEntity> docs = entry.getValue();
+                
+                if (!docs.isEmpty()) {
+                    DocumentEntity firstDoc = docs.get(0);
+                    Map<String, Object> categoryInfo = new HashMap<>();
                     
-                    List<Map<String, Object>> midCategories = majorEntry.getValue().entrySet().stream()
-                        .map(midEntry -> {
-                            Map<String, Object> mid = new HashMap<>();
-                            mid.put("name", midEntry.getKey());
-                            mid.put("code", midEntry.getValue().values().iterator().next().get(0).getCategory().getMidCode());
-                            mid.put("count", midEntry.getValue().values().stream()
-                                .mapToInt(List::size)
-                                .sum());
-                            
-                            List<Map<String, Object>> subCategories = midEntry.getValue().entrySet().stream()
-                                .map(subEntry -> {
-                                    Map<String, Object> sub = new HashMap<>();
-                                    sub.put("name", subEntry.getKey());
-                                    sub.put("code", subEntry.getValue().get(0).getCategory().getSubCode());
-                                    sub.put("count", subEntry.getValue().size());
-                                    return sub;
-                                })
-                                .sorted(Comparator.comparing(sub -> (String) sub.get("name")))
-                                .collect(Collectors.toList());
-                            
-                            mid.put("subCategories", subCategories);
-                            return mid;
-                        })
-                        .sorted(Comparator.comparing(mid -> (String) mid.get("name")))
-                        .collect(Collectors.toList());
+                    if (firstDoc.getCategory().getHierarchy() != null && !firstDoc.getCategory().getHierarchy().isEmpty()) {
+                        // 가변 계층 구조 사용
+                        categoryInfo.put("code", categoryCode);
+                        categoryInfo.put("fullName", firstDoc.getCategory().getFullName());
+                        categoryInfo.put("hierarchy", firstDoc.getCategory().getHierarchy());
+                        categoryInfo.put("count", docs.size());
+                    } else {
+                        // 기존 3레벨 구조 사용
+                        categoryInfo.put("code", categoryCode);
+                        categoryInfo.put("fullName", firstDoc.getCategory().getMajorName() + " > " + 
+                                                   firstDoc.getCategory().getMidName() + " > " + 
+                                                   firstDoc.getCategory().getSubName());
+                        categoryInfo.put("majorName", firstDoc.getCategory().getMajorName());
+                        categoryInfo.put("midName", firstDoc.getCategory().getMidName());
+                        categoryInfo.put("subName", firstDoc.getCategory().getSubName());
+                        categoryInfo.put("count", docs.size());
+                    }
                     
-                    major.put("midCategories", midCategories);
-                    return major;
-                })
-                .sorted(Comparator.comparing(major -> (String) major.get("name")))
-                .collect(Collectors.toList());
+                    hierarchyData.add(categoryInfo);
+                }
+            }
+            
+            // 코드 순으로 정렬
+            hierarchyData.sort(Comparator.comparing(cat -> (String) cat.get("code")));
             
             Map<String, Object> response = new HashMap<>();
             response.put("hierarchy", hierarchyData);
             response.put("totalDocuments", allDocuments.size());
-            response.put("totalCategories", hierarchy.size());
+            response.put("totalCategories", hierarchyData.size());
             
-            log.info("문서 분류별 계층 구조 조회 완료: {}개 대분류, {}개 문서", hierarchy.size(), allDocuments.size());
+            log.info("문서 분류별 계층 구조 조회 완료: {}개 카테고리, {}개 문서", hierarchyData.size(), allDocuments.size());
             return ResponseEntity.ok(response);
             
         } catch (Exception e) {
@@ -204,26 +196,21 @@ public class AdminController {
     }
     
     /**
-     * 특정 분류의 문서 목록 조회
+     * 특정 분류의 문서 목록 조회 (가변 계층 지원)
      */
-    @GetMapping("/documents/category/{majorCode}/{midCode}/{subCode}")
+    @GetMapping("/documents/category/{categoryCode}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> getDocumentsByCategory(
-            @PathVariable String majorCode,
-            @PathVariable String midCode,
-            @PathVariable String subCode,
+            @PathVariable String categoryCode,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         try {
-            log.info("분류별 문서 조회 요청: {}/{}/{}, page={}, size={}", majorCode, midCode, subCode, page, size);
+            log.info("분류별 문서 조회 요청: {}, page={}, size={}", categoryCode, page, size);
             
-            // 분류별 문서 조회 (실제 구현에서는 MongoDB 쿼리 사용)
+            // 분류별 문서 조회
             List<DocumentEntity> allDocuments = documentRepository.findAll();
             List<DocumentEntity> filteredDocuments = allDocuments.stream()
-                .filter(doc -> doc.getCategory() != null &&
-                    doc.getCategory().getMajorCode().equals(majorCode) &&
-                    doc.getCategory().getMidCode().equals(midCode) &&
-                    doc.getCategory().getSubCode().equals(subCode))
+                .filter(doc -> doc.getCategory() != null && matchesCategory(doc, categoryCode))
                 .sorted(Comparator.comparing(doc -> doc.getSerial() != null ? doc.getSerial().getFull() : ""))
                 .collect(Collectors.toList());
             
@@ -243,6 +230,16 @@ public class AdminController {
                     docData.put("createdAt", doc.getCreatedAt());
                     docData.put("approvedAt", doc.getApprovedAt());
                     docData.put("ownerId", doc.getOwnerId());
+                    
+                    // 카테고리 정보 추가
+                    if (doc.getCategory().getHierarchy() != null && !doc.getCategory().getHierarchy().isEmpty()) {
+                        docData.put("categoryName", doc.getCategory().getFullName());
+                    } else {
+                        docData.put("categoryName", doc.getCategory().getMajorName() + " > " + 
+                                                  doc.getCategory().getMidName() + " > " + 
+                                                  doc.getCategory().getSubName());
+                    }
+                    
                     return docData;
                 })
                 .collect(Collectors.toList());
@@ -253,7 +250,7 @@ public class AdminController {
             response.put("totalPages", (int) Math.ceil((double) filteredDocuments.size() / size));
             response.put("currentPage", page);
             response.put("size", size);
-            response.put("category", majorCode + "/" + midCode + "/" + subCode);
+            response.put("category", categoryCode);
             
             log.info("분류별 문서 조회 완료: {}개 문서", filteredDocuments.size());
             return ResponseEntity.ok(response);
@@ -262,6 +259,24 @@ public class AdminController {
             log.error("분류별 문서 조회 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
+    }
+    
+    /**
+     * 문서가 특정 카테고리에 속하는지 확인하는 헬퍼 메서드
+     */
+    private boolean matchesCategory(DocumentEntity doc, String categoryCode) {
+        if (doc.getCategory() == null) return false;
+        
+        // fullCode 우선 확인
+        if (doc.getCategory().getFullCode() != null) {
+            return doc.getCategory().getFullCode().equals(categoryCode);
+        }
+        
+        // 기존 3레벨 구조 확인
+        String legacyCode = doc.getCategory().getMajorCode() + "-" + 
+                           doc.getCategory().getMidCode() + "-" + 
+                           doc.getCategory().getSubCode();
+        return legacyCode.equals(categoryCode);
     }
     
 
@@ -313,6 +328,68 @@ public class AdminController {
     
     
     
+    /**
+     * 카테고리별 문서 삭제 (가변 계층 지원)
+     */
+    @DeleteMapping("/documents/category/{categoryCode}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> deleteDocumentsByCategory(@PathVariable String categoryCode) {
+        try {
+            log.info("카테고리별 문서 삭제 요청: {}", categoryCode);
+            
+            // 1. 해당 카테고리의 모든 문서 조회
+            List<DocumentEntity> allDocuments = documentRepository.findAll();
+            List<DocumentEntity> documentsToDelete = allDocuments.stream()
+                .filter(doc -> doc.getCategory() != null && matchesCategory(doc, categoryCode))
+                .collect(Collectors.toList());
+            
+            if (documentsToDelete.isEmpty()) {
+                log.warn("삭제할 문서를 찾을 수 없음: {}", categoryCode);
+                return ResponseEntity.notFound().build();
+            }
+            
+            int deletedCount = 0;
+            int fileDeletedCount = 0;
+            
+            for (DocumentEntity document : documentsToDelete) {
+                try {
+                    // 2. FAISS 벡터 인덱스에서 제거
+                    faissVectorSearchService.removeDocument(document.getId());
+                    log.info("FAISS 벡터 인덱스에서 문서 제거: {}", document.getId());
+                    
+                    // 3. MongoDB에서 문서 삭제
+                    documentRepository.delete(document);
+                    deletedCount++;
+                    log.info("MongoDB에서 문서 삭제: {}", document.getId());
+                    
+                    // 4. 파일시스템에서 파일 삭제
+                    if (localFileStorageService.deleteDocumentFile(document)) {
+                        fileDeletedCount++;
+                        log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial() != null ? document.getSerial().getFull() : document.getId());
+                    } else {
+                        log.warn("파일시스템에서 파일 삭제 실패: {}", document.getSerial() != null ? document.getSerial().getFull() : document.getId());
+                    }
+                    
+                } catch (Exception e) {
+                    log.error("문서 삭제 중 오류 발생 (문서 ID: {}): {}", document.getId(), e.getMessage(), e);
+                }
+            }
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("categoryCode", categoryCode);
+            result.put("deletedDocuments", deletedCount);
+            result.put("deletedFiles", fileDeletedCount);
+            result.put("message", String.format("카테고리 %s의 %d개 문서와 %d개 파일이 삭제되었습니다.", categoryCode, deletedCount, fileDeletedCount));
+            
+            log.info("카테고리별 문서 삭제 완료: {} (문서: {}개, 파일: {}개)", categoryCode, deletedCount, fileDeletedCount);
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("카테고리별 문서 삭제 중 오류 발생: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     /**
      * 코드로 문서 삭제 (벡터DB + 파일시스템)
      */

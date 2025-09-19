@@ -7,7 +7,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import api from '@/lib/api'
-import { SingleIngestRequest, IngestPreviewResponse } from '@/types/api'
+import { SingleIngestRequest, IngestPreviewResponse, Category } from '@/types/api'
+
+// 가변 계층 카테고리 표시를 위한 유틸리티 함수
+const formatCategoryHierarchy = (category: Category | undefined): string => {
+  if (!category) return '분류 없음';
+  
+  // 새로운 가변 계층 형식이 있는 경우
+  if (category.hierarchy && Array.isArray(category.hierarchy)) {
+    return category.hierarchy
+      .sort((a: any, b: any) => a.level - b.level)
+      .map((level: any) => level.name)
+      .join(' > ');
+  }
+  
+  // 기존 3단계 형식 fallback
+  const parts = [];
+  if (category.majorName) parts.push(category.majorName);
+  if (category.midName && category.midName !== category.majorName) parts.push(category.midName);
+  if (category.subName && category.subName !== category.midName) parts.push(category.subName);
+  
+  return parts.length > 0 ? parts.join(' > ') : '분류 없음';
+};
 
 export default function RepositoryIngestPage() {
   const [repoUrl, setRepoUrl] = useState('')
@@ -174,15 +195,40 @@ export default function RepositoryIngestPage() {
               <div>
                 <h4 className="font-medium text-gray-900 mb-2">제안된 카테고리</h4>
                 <div className="bg-gray-50 p-3 rounded-md">
-                  <p className="text-sm">
-                    <span className="font-medium">대분류:</span> {preview.proposedCategory.majorName} ({preview.proposedCategory.majorCode})
+                  <p className="text-sm font-medium text-gray-900 mb-2">
+                    {formatCategoryHierarchy(preview.proposedCategory)}
                   </p>
-                  <p className="text-sm">
-                    <span className="font-medium">중분류:</span> {preview.proposedCategory.midName} ({preview.proposedCategory.midCode})
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">소분류:</span> {preview.proposedCategory.subName} ({preview.proposedCategory.subCode})
-                  </p>
+                  {preview.proposedCategory.hierarchy && preview.proposedCategory.hierarchy.length > 0 ? (
+                    <div className="space-y-1">
+                      {preview.proposedCategory.hierarchy
+                        .sort((a: any, b: any) => a.level - b.level)
+                        .map((level: any, index: number) => (
+                          <p key={index} className="text-sm">
+                            <span className="font-medium">{level.level}단계:</span> {level.name} ({level.code})
+                          </p>
+                        ))
+                      }
+                    </div>
+                  ) : (
+                    // 기존 3단계 형식 fallback
+                    <div className="space-y-1">
+                      {preview.proposedCategory.majorName && (
+                        <p className="text-sm">
+                          <span className="font-medium">대분류:</span> {preview.proposedCategory.majorName} ({preview.proposedCategory.majorCode})
+                        </p>
+                      )}
+                      {preview.proposedCategory.midName && (
+                        <p className="text-sm">
+                          <span className="font-medium">중분류:</span> {preview.proposedCategory.midName} ({preview.proposedCategory.midCode})
+                        </p>
+                      )}
+                      {preview.proposedCategory.subName && (
+                        <p className="text-sm">
+                          <span className="font-medium">소분류:</span> {preview.proposedCategory.subName} ({preview.proposedCategory.subCode})
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

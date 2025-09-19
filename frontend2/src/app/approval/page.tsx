@@ -21,6 +21,55 @@ import { isApiImplemented } from '@/lib/api-status'
 
 type StatusFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED'
 
+// 가변 계층 카테고리 표시를 위한 유틸리티 함수
+const formatCategoryHierarchy = (category: any): string => {
+  if (!category) return '분류 없음';
+  
+  // 새로운 가변 계층 형식이 있는 경우
+  if (category.hierarchy && Array.isArray(category.hierarchy)) {
+    return category.hierarchy
+      .sort((a: any, b: any) => a.level - b.level)
+      .map((level: any) => level.name)
+      .join(' > ');
+  }
+  
+  // 기존 3단계 형식 fallback
+  const parts = [];
+  if (category.majorName) parts.push(category.majorName);
+  if (category.midName) parts.push(category.midName);
+  if (category.subName) parts.push(category.subName);
+  
+  return parts.length > 0 ? parts.join(' > ') : '분류 없음';
+};
+
+const formatCategoryDetails = (category: any): Array<{label: string, value: string}> => {
+  if (!category) return [];
+  
+  // 새로운 가변 계층 형식이 있는 경우
+  if (category.hierarchy && Array.isArray(category.hierarchy)) {
+    return category.hierarchy
+      .sort((a: any, b: any) => a.level - b.level)
+      .map((level: any) => ({
+        label: `${level.level}단계`,
+        value: `${level.name} (${level.code})`
+      }));
+  }
+  
+  // 기존 3단계 형식 fallback
+  const details = [];
+  if (category.majorName) {
+    details.push({ label: '대분류', value: `${category.majorName} (${category.majorCode})` });
+  }
+  if (category.midName) {
+    details.push({ label: '중분류', value: `${category.midName} (${category.midCode})` });
+  }
+  if (category.subName) {
+    details.push({ label: '소분류', value: `${category.subName} (${category.subCode})` });
+  }
+  
+  return details;
+};
+
 export default function ApprovalPage() {
   const [requests, setRequests] = useState<ApprovalRequest[]>([])
   const [filteredRequests, setFilteredRequests] = useState<ApprovalRequest[]>([])
@@ -74,9 +123,7 @@ export default function ApprovalPage() {
       filtered = filtered.filter(req => 
         req.proposedPurpose.toLowerCase().includes(term) ||
         (req.proposedTitle && req.proposedTitle.toLowerCase().includes(term)) ||
-        (req.proposedCategory?.majorName && req.proposedCategory.majorName.toLowerCase().includes(term)) ||
-        (req.proposedCategory?.midName && req.proposedCategory.midName.toLowerCase().includes(term)) ||
-        (req.proposedCategory?.subName && req.proposedCategory.subName.toLowerCase().includes(term))
+        formatCategoryHierarchy(req.proposedCategory).toLowerCase().includes(term)
       )
     }
 
@@ -283,10 +330,7 @@ export default function ApprovalPage() {
                       </h3>
                       
                       <p className="text-sm text-gray-600 mb-2">
-                        {request.proposedCategory ? 
-                          `${request.proposedCategory.majorName} > ${request.proposedCategory.midName} > ${request.proposedCategory.subName}` :
-                          '카테고리 미분류'
-                        }
+                        {formatCategoryHierarchy(request.proposedCategory)}
                       </p>
                       
                       {request.similarCandidates && request.similarCandidates.length > 0 && (
@@ -351,17 +395,18 @@ export default function ApprovalPage() {
                   <h4 className="font-medium text-gray-900 mb-2">제안된 카테고리</h4>
                   <div className="bg-gray-50 p-3 rounded-md">
                     {selectedRequest.proposedCategory ? (
-                      <>
-                        <p className="text-sm">
-                          <span className="font-medium">대분류:</span> {selectedRequest.proposedCategory.majorName} ({selectedRequest.proposedCategory.majorCode})
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-gray-900">
+                          {formatCategoryHierarchy(selectedRequest.proposedCategory)}
                         </p>
-                        <p className="text-sm">
-                          <span className="font-medium">중분류:</span> {selectedRequest.proposedCategory.midName} ({selectedRequest.proposedCategory.midCode})
-                        </p>
-                        <p className="text-sm">
-                          <span className="font-medium">소분류:</span> {selectedRequest.proposedCategory.subName} ({selectedRequest.proposedCategory.subCode})
-                        </p>
-                      </>
+                        <div className="space-y-1">
+                          {formatCategoryDetails(selectedRequest.proposedCategory).map((detail, index) => (
+                            <p key={index} className="text-sm">
+                              <span className="font-medium">{detail.label}:</span> {detail.value}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
                     ) : (
                       <p className="text-sm text-gray-500">카테고리가 제안되지 않았습니다.</p>
                     )}

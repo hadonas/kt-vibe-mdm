@@ -48,4 +48,31 @@ public interface DocumentRepository extends MongoRepository<DocumentEntity, Stri
     
     @Query("{'vectors.purpose_768': {$exists: false}}")
     List<DocumentEntity> findDocumentsWithoutVectors();
+    
+    // 스마트 재분류용 카테고리별 문서 조회 메서드들
+    
+    @Query("{'category.majorCode': ?0}")
+    List<DocumentEntity> findByCategoryMajorCode(String majorCode);
+    
+    @Query("{'category.midCode': ?0}")
+    List<DocumentEntity> findByCategoryMidCode(String midCode);
+    
+    @Query("{'category.subCode': ?0}")
+    List<DocumentEntity> findByCategorySubCode(String subCode);
+    
+    @Query("{'category.fullCode': ?0}")
+    List<DocumentEntity> findByCategoryFullCode(String fullCode);
+    
+    // 카테고리별 문서 개수 조회 메서드들
+    @Query(value = "{'category.majorCode': ?0}", count = true)
+    long countByCategoryMajorCode(String majorCode);
+    
+    @Query(value = "{'category.midCode': ?0}", count = true)
+    long countByCategoryMidCode(String midCode);
+    
+    @Query(value = "{'category.subCode': ?0}", count = true)
+    long countByCategorySubCode(String subCode);
+    
+    @Query(value = "{'category.fullCode': ?0}", count = true)
+    long countByCategoryFullCode(String fullCode);
 }
