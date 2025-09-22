@@ -3,6 +3,7 @@ package com.company.app.catalog.service;
 import com.company.app.catalog.entity.CatalogNode;
 import com.company.app.catalog.repository.CatalogNodeRepository;
 import com.company.app.search.service.EmbeddingService;
+import com.company.app.search.service.ElasticsearchVectorSearchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,7 @@ public class HybridCategorySearchService {
     
     private final CatalogNodeRepository catalogNodeRepository;
     private final EmbeddingService embeddingService;
+    private final ElasticsearchVectorSearchService elasticsearchVectorSearchService;
     
     @Value("${classification.candidate-count:10}")
     private int candidateCount;
@@ -105,12 +107,49 @@ public class HybridCategorySearchService {
     }
     
     /**
-     * Vector Search 기반 유사도 검색
+     * Vector Search 기반 유사도 검색 (Elasticsearch 우선, fallback 지원)
      */
     private List<CategorySearchResult> performVectorSearch(String text) {
+        try {
+            log.info("벡터 검색으로 카테고리 후보 조회 시작");
+            
+            // 1. Elasticsearch 벡터 검색 시도
+            List<ElasticsearchVectorSearchService.CategorySearchResult> esResults = 
+                elasticsearchVectorSearchService.searchCategories(text, candidateCount);
+            
+            if (!esResults.isEmpty()) {
+                // Elasticsearch 결과를 HybridCategorySearchService.CategorySearchResult로 변환
+                List<CategorySearchResult> results = new ArrayList<>();
+                for (ElasticsearchVectorSearchService.CategorySearchResult esResult : esResults) {
+                    results.add(new CategorySearchResult(
+                        esResult.getCategory(), 
+                        0.0, // BM25 점수는 0으로 설정
+                        esResult.getVectorScore(), 
+                        0.0 // 하이브리드 점수는 나중에 계산
+                    ));
+                }
+                
+                log.info("Elasticsearch 벡터 검색 완료: {}개 카테고리 후보", results.size());
+                return results;
+            }
+            
+        } catch (Exception e) {
+            log.warn("Elasticsearch 벡터 검색 실패, fallback 사용: {}", e.getMessage());
+        }
+        
+        // 2. Fallback: 기존 방식 사용
+        return performFallbackVectorSearch(text);
+    }
+    
+    /**
+     * Fallback Vector Search (기존 방식)
+     */
+    private List<CategorySearchResult> performFallbackVectorSearch(String text) {
         List<CategorySearchResult> results = new ArrayList<>();
         
         try {
+            log.info("Fallback 벡터 검색 시작");
+            
             // 1. 텍스트 임베딩 생성
             List<Double> textEmbedding = embeddingService.generateEmbedding(text);
             
@@ -121,16 +160,16 @@ public class HybridCategorySearchService {
             for (CatalogNode category : categoriesWithEmbedding) {
                 try {
                     double similarity = embeddingService.cosineSimilarity(textEmbedding, category.getVector());
-                    results.add(new CategorySearchResult(category, similarity, 0.0, 0.0));
+                    results.add(new CategorySearchResult(category, 0.0, similarity, 0.0));
                 } catch (Exception e) {
                     log.warn("카테고리 유사도 계산 실패: {}", category.getCode(), e);
                 }
             }
             
-            log.debug("Vector 검색 결과: {}개", results.size());
+            log.debug("Fallback Vector 검색 결과: {}개", results.size());
             
         } catch (Exception e) {
-            log.error("Vector 검색 중 오류", e);
+            log.error("Fallback Vector 검색 중 오류", e);
         }
         
         return results;

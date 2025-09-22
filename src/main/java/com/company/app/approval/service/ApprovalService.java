@@ -11,6 +11,8 @@ import com.company.app.common.dto.Source;
 import com.company.app.file.service.LocalFileStorageService;
 import com.company.app.file.service.FileAnalysisService;
 import com.company.app.ingest.service.RepositoryAnalysisService;
+import com.company.app.ingest.service.ChunkIngestionService;
+import com.company.app.search.service.ElasticsearchIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -35,6 +37,8 @@ public class ApprovalService {
     private final LocalFileStorageService localFileStorageService;
     private final FileAnalysisService fileAnalysisService;
     private final RepositoryAnalysisService repositoryAnalysisService;
+    private final ChunkIngestionService chunkIngestionService; // 청킹 서비스
+    private final ElasticsearchIndexService elasticsearchIndexService; // ES 색인
     
     public Page<IngestRequest> getApprovalRequests(int page, int size, String status) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "requestedAt"));
@@ -108,7 +112,14 @@ public class ApprovalService {
             String savedFilePath = moveTempFileToFinal(request, savedDocument);
             log.info("문서가 최종 저장소에 저장됨: {}", savedFilePath);
             
-            // 5. 처리 완료 상태로 변경
+            // 5. 의미 기반 청킹 및 청크 저장 + ES 색인
+            try {
+                var chunks = chunkIngestionService.chunkAndPersist(savedDocument);
+                elasticsearchIndexService.indexChunks(chunks);
+            } catch (Exception ce) {
+                log.error("문서 청킹/색인 실패: {}", savedDocument.getId(), ce);
+            }
+            // 6. 처리 완료 상태로 변경
             request.setStatus(IngestRequest.Status.COMPLETED);
             request.setProcessedAt(LocalDateTime.now());
             

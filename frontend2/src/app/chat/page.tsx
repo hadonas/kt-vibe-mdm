@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useAuth } from '@/contexts/AuthContexts'
-import api from '@/lib/api'
+import api, { searchApi } from '@/lib/api'
 import { ChatQueryRequest, ChatQueryResponse } from '@/types/api'
 import { formatDate } from '@/lib/utils'
 import { mockApi } from '@/lib/mock-api'
@@ -107,7 +107,7 @@ export default function ChatPage() {
       setMessages([{
         id: 'welcome',
         type: 'assistant',
-        content: '안녕하세요! MDM RAG 채팅 시스템입니다.\n\n등록된 문서들에 대해 질문해주세요. 관련 문서를 검색하여 정확한 답변을 드리겠습니다.\n\n예시 질문:\n• "프로젝트 계획서에 대해 알려주세요"\n• "React 관련 문서가 있나요?"\n• "최근 등록된 API 문서를 찾아주세요"',
+        content: '안녕하세요! MDM AI 채팅 시스템입니다.\n\n등록된 문서들에 대해 질문해주세요. 관련 문서를 검색하여 정확한 답변을 드리겠습니다.\n\n예시 질문:\n• "프로젝트 계획서에 대해 알려주세요"\n• "React 관련 문서가 있나요?"\n• "최근 등록된 API 문서를 찾아주세요"',
         timestamp: new Date()
       }])
     }

@@ -7,6 +7,7 @@ import com.company.app.document.entity.DocumentEntity;
 import com.company.app.document.repository.DocumentRepository;
 import com.company.app.file.service.LocalFileStorageService;
 import com.company.app.ingest.service.RepositoryAnalysisService;
+import com.company.app.search.service.ElasticsearchIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -36,6 +37,7 @@ public class DocumentReclassificationService {
     @SuppressWarnings("unused")
     private final CatalogNodeRepository catalogNodeRepository;
     private final RepositoryAnalysisService repositoryAnalysisService;
+    private final ElasticsearchIndexService elasticsearchIndexService;
     
     /**
      * 모든 문서를 스마트 분류로 재분류
@@ -198,7 +200,16 @@ public class DocumentReclassificationService {
                 document.setCategory(newCategory);
                 document.setSerial(newSerial);
                 document.setUpdatedAt(LocalDateTime.now());
-                documentRepository.save(document);
+                DocumentEntity savedDocument = documentRepository.save(document);
+                
+                // Elasticsearch 인덱스도 업데이트
+                try {
+                    elasticsearchIndexService.updateDocumentInIndex(savedDocument);
+                    log.info("Elasticsearch 문서 인덱스 업데이트 완료: {}", savedDocument.getId());
+                } catch (Exception e) {
+                    log.warn("Elasticsearch 문서 인덱스 업데이트 실패: {}", savedDocument.getId(), e);
+                    // Elasticsearch 실패는 전체 실패로 처리하지 않음
+                }
                 
                 log.info("문서 재분류 성공: {} -> {} (카테고리: {} -> {})", 
                     oldSerial, newSerial.getFull(), originalCategory.getFullCode(), newCategory.getFullCode());

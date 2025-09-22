@@ -3,6 +3,7 @@ package com.company.app.catalog.service;
 import com.company.app.catalog.entity.CatalogNode;
 import com.company.app.catalog.repository.CatalogNodeRepository;
 import com.company.app.search.service.EmbeddingService;
+import com.company.app.search.service.ElasticsearchIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ public class CategoryEmbeddingService {
     
     private final CatalogNodeRepository catalogNodeRepository;
     private final EmbeddingService embeddingService;
+    private final ElasticsearchIndexService elasticsearchIndexService;
     
     /**
      * 카테고리의 임베딩 벡터 생성
@@ -107,7 +109,18 @@ public class CategoryEmbeddingService {
             category.setVector(embedding);
             category.setLastVectorUpdate(LocalDateTime.now());
             
-            return catalogNodeRepository.save(category);
+            CatalogNode savedCategory = catalogNodeRepository.save(category);
+            
+            // Elasticsearch 인덱스도 업데이트
+            try {
+                elasticsearchIndexService.updateCategoryInIndex(savedCategory);
+                log.info("Elasticsearch 카테고리 인덱스 업데이트 완료: {}", categoryCode);
+            } catch (Exception e) {
+                log.warn("Elasticsearch 카테고리 인덱스 업데이트 실패: {}", categoryCode, e);
+                // Elasticsearch 실패는 전체 실패로 처리하지 않음
+            }
+            
+            return savedCategory;
             
         } catch (Exception e) {
             log.error("카테고리 임베딩 업데이트 중 오류: {}", categoryCode, e);

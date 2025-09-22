@@ -2,6 +2,7 @@ package com.company.app.search.service;
 
 import com.company.app.document.entity.DocumentEntity;
 import com.company.app.document.repository.DocumentRepository;
+import com.company.app.search.service.ElasticsearchVectorSearchService;
 import com.company.app.search.util.ANNSearchUtil;
 import com.company.app.search.util.VectorShardingUtil;
 import lombok.RequiredArgsConstructor;
@@ -15,9 +16,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -28,6 +27,7 @@ public class VectorSearchService {
     private final MongoTemplate mongoTemplate;
     private final DocumentRepository documentRepository;
     private final EmbeddingService embeddingService;
+    private final ElasticsearchVectorSearchService elasticsearchVectorSearchService;
     private final VectorShardingUtil shardingUtil;
     private final ANNSearchUtil annSearchUtil;
     
@@ -37,20 +37,34 @@ public class VectorSearchService {
      */
     public List<DocumentEntity> findSimilarDocuments(String text, int topK) {
         try {
-            log.info("ANN 벡터 검색 시작: {}자 텍스트, 상위 {}개", text.length(), topK);
+            log.info("벡터 검색 시작: {}자 텍스트, 상위 {}개", text.length(), topK);
             
-            // 1. 텍스트를 임베딩으로 변환
+            // 1. Elasticsearch 벡터 검색 시도
+            try {
+                log.info("=== Elasticsearch 벡터 검색 시도 시작 ===");
+                List<DocumentEntity> esResults = elasticsearchVectorSearchService.searchDocuments(text, topK);
+                log.info("Elasticsearch 검색 결과: {}개", esResults.size());
+                if (!esResults.isEmpty()) {
+                    log.info("Elasticsearch 벡터 검색 완료: {}개 문서 발견", esResults.size());
+                    return esResults;
+                }
+                log.info("Elasticsearch 검색 결과가 비어있음, fallback 사용");
+            } catch (Exception esException) {
+                log.warn("Elasticsearch 벡터 검색 실패, fallback 사용: {}", esException.getMessage());
+                esException.printStackTrace();
+            }
+            
+            // 2. Fallback: ANN 검색 실행
+            log.info("Fallback ANN 벡터 검색 시작");
             List<Double> queryEmbedding = embeddingService.generateEmbedding(text);
-            
-            // 2. ANN 검색 실행
             List<DocumentEntity> results = executeANNSearch(queryEmbedding, topK);
             
-            log.info("ANN 벡터 검색 완료: {}개 문서 발견", results.size());
+            log.info("Fallback ANN 벡터 검색 완료: {}개 문서 발견", results.size());
             return results;
             
         } catch (Exception e) {
-            log.error("ANN 벡터 검색 중 오류 발생: {}", e.getMessage(), e);
-            return fallbackSearch(text, topK);
+            log.error("모든 벡터 검색 실패: {}", e.getMessage(), e);
+            return Collections.emptyList();
         }
     }
     

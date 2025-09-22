@@ -1097,4 +1097,53 @@ public class LocalFileStorageService {
             return false;
         }
     }
+    
+    /**
+     * 문서 파일의 내용을 바이트 배열로 반환 (다운로드용)
+     */
+    public byte[] getDocumentFileBytes(DocumentEntity document) {
+        try {
+            String filePath = getExistingDocumentFilePath(document);
+            if (filePath == null) {
+                log.warn("문서 파일을 찾을 수 없음: {}", document.getId());
+                return null;
+            }
+            
+            Path path = Paths.get(filePath);
+            if (!Files.exists(path)) {
+                log.warn("파일이 존재하지 않음: {}", filePath);
+                return null;
+            }
+            
+            byte[] fileBytes = Files.readAllBytes(path);
+            log.debug("문서 파일 읽기 성공: {} ({}바이트)", filePath, fileBytes.length);
+            return fileBytes;
+            
+        } catch (Exception e) {
+            log.error("문서 파일 읽기 중 오류 발생: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    /**
+     * 문서의 원본 파일명 반환 (확장자 포함)
+     */
+    public String getDocumentFileName(DocumentEntity document) {
+        try {
+            String filePath = getExistingDocumentFilePath(document);
+            if (filePath == null) {
+                // 파일이 없으면 기본 파일명 생성
+                String serialCode = document.getSerial() != null ? document.getSerial().getFull() : document.getId();
+                return serialCode + ".txt";
+            }
+            
+            Path path = Paths.get(filePath);
+            return path.getFileName().toString();
+            
+        } catch (Exception e) {
+            log.error("문서 파일명 조회 중 오류 발생: {}", e.getMessage(), e);
+            String serialCode = document.getSerial() != null ? document.getSerial().getFull() : document.getId();
+            return serialCode + ".txt";
+        }
+    }
 }

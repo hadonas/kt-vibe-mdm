@@ -2,9 +2,10 @@ package com.company.app.admin.controller;
 
 import com.company.app.document.entity.DocumentEntity;
 import com.company.app.document.repository.DocumentRepository;
+import com.company.app.document.repository.DocumentChunkRepository;
 import com.company.app.catalog.repository.CatalogNodeRepository;
 import com.company.app.file.service.LocalFileStorageService;
-import com.company.app.search.service.FaissVectorSearchService;
+import com.company.app.search.service.ElasticsearchIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -26,8 +27,9 @@ import java.util.Optional;
 public class AdminController {
     
     private final DocumentRepository documentRepository;
+    private final DocumentChunkRepository chunkRepository;
     private final LocalFileStorageService localFileStorageService;
-    private final FaissVectorSearchService faissVectorSearchService;
+    private final ElasticsearchIndexService elasticsearchIndexService;
     
     /**
      * 모든 문서 목록 조회
@@ -353,16 +355,38 @@ public class AdminController {
             
             for (DocumentEntity document : documentsToDelete) {
                 try {
-                    // 2. FAISS 벡터 인덱스에서 제거
-                    faissVectorSearchService.removeDocument(document.getId());
-                    log.info("FAISS 벡터 인덱스에서 문서 제거: {}", document.getId());
                     
-                    // 3. MongoDB에서 문서 삭제
+                    // 2. MongoDB 청크 삭제
+                    try {
+                        chunkRepository.deleteByDocumentId(document.getId());
+                        log.info("MongoDB에서 청크 삭제: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("MongoDB 청크 삭제 실패: {}", document.getId(), e);
+                    }
+                    
+                    // 3. Elasticsearch 인덱스에서 문서 제거
+                    try {
+                        elasticsearchIndexService.deleteDocumentFromIndex(document.getId());
+                        log.info("Elasticsearch 인덱스에서 문서 제거: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("Elasticsearch 문서 삭제 실패: {}", document.getId(), e);
+                        // Elasticsearch 실패는 전체 실패로 처리하지 않음
+                    }
+                    
+                    // 4. Elasticsearch 청크 삭제
+                    try {
+                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
+                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
+                    }
+                    
+                    // 5. MongoDB에서 문서 삭제
                     documentRepository.delete(document);
                     deletedCount++;
                     log.info("MongoDB에서 문서 삭제: {}", document.getId());
                     
-                    // 4. 파일시스템에서 파일 삭제
+                    // 6. 파일시스템에서 파일 삭제
                     if (localFileStorageService.deleteDocumentFile(document)) {
                         fileDeletedCount++;
                         log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial() != null ? document.getSerial().getFull() : document.getId());
@@ -430,16 +454,38 @@ public class AdminController {
             
             for (DocumentEntity document : documents) {
                 try {
-                    // 2. FAISS 벡터 인덱스에서 제거
-                    faissVectorSearchService.removeDocument(document.getId());
-                    log.info("FAISS 벡터 인덱스에서 문서 제거: {}", document.getId());
                     
-                    // 3. MongoDB에서 문서 삭제
+                    // 2. MongoDB 청크 삭제
+                    try {
+                        chunkRepository.deleteByDocumentId(document.getId());
+                        log.info("MongoDB에서 청크 삭제: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("MongoDB 청크 삭제 실패: {}", document.getId(), e);
+                    }
+                    
+                    // 3. Elasticsearch 인덱스에서 문서 제거
+                    try {
+                        elasticsearchIndexService.deleteDocumentFromIndex(document.getId());
+                        log.info("Elasticsearch 인덱스에서 문서 제거: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("Elasticsearch 문서 삭제 실패: {}", document.getId(), e);
+                        // Elasticsearch 실패는 전체 실패로 처리하지 않음
+                    }
+                    
+                    // 4. Elasticsearch 청크 삭제
+                    try {
+                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
+                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
+                    }
+                    
+                    // 5. MongoDB에서 문서 삭제
                     documentRepository.delete(document);
                     deletedCount++;
                     log.info("MongoDB에서 문서 삭제: {}", document.getId());
                     
-                    // 4. 파일시스템에서 파일 삭제
+                    // 6. 파일시스템에서 파일 삭제
                     if (localFileStorageService.deleteDocumentFile(document)) {
                         fileDeletedCount++;
                         log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial().getFull());
