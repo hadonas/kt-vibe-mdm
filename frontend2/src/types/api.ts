@@ -122,6 +122,8 @@ export interface ChatSource {
   docId: string
   serial: string
   snippet: string
+  filename?: string
+  score: number
 }
 
 // File Types

@@ -88,6 +88,10 @@ public class ChatService {
                 log.warn("청크 검색 결과가 비어있습니다.");
             }
             
+            // 2.5. 소스를 관련도(점수) 순으로 정렬 (내림차순)
+            sources.sort((s1, s2) -> Double.compare(s2.getScore(), s1.getScore()));
+            log.info("소스 {}개를 관련도 순으로 정렬 완료", sources.size());
+            
             // 3. 프롬프트 생성 및 LLM을 사용한 답변 생성
             log.info("LLM 서비스 호출 시작 - 컨텍스트 청크 수: {}", contextDocuments.size());
             String prompt = buildPrompt(request.getQuery(), contextDocuments);

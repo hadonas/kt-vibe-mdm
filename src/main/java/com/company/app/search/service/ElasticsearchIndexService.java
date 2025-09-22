@@ -438,7 +438,7 @@ public class ElasticsearchIndexService {
             // 벡터 검색 임계값 0.2 → 0.25로 상향
             Map<String,Object> params = new HashMap<>();
             params.put("query_vector", embedding);
-            params.put("threshold", 0.25); // 임계값 상향
+            params.put("threshold", 0.20);
             
             // 임계값을 적용한 스크립트 (코사인 유사도 + 1.0 보정, 임계값 이상만 반환)
             Script script = new Script(ScriptType.INLINE, "painless", 
@@ -456,13 +456,13 @@ public class ElasticsearchIndexService {
             List<ChunkSearchHit> results = new java.util.ArrayList<>();
             for (SearchHit hit : resp.getHits().getHits()) {
                 // 임계값 미달 결과 필터링
-                if (hit.getScore() < 1.25) continue; // 1.0 + 0.25 임계값
-                
+                if (hit.getScore() < 1.20) continue; // 1.0 + 0.20 임계값
+
                 ChunkSearchHit ch = createChunkSearchHit(hit, "vector");
                 results.add(ch);
             }
-            
-            log.debug("벡터 검색 결과: {}개 (임계값 0.25 적용)", results.size());
+
+            log.debug("벡터 검색 결과: {}개 (임계값 0.20 적용)", results.size());
             return results;
         } catch (Exception e) {
             log.error("벡터 검색 실패", e);
