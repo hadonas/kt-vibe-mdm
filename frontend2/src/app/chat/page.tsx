@@ -28,6 +28,8 @@ interface ChatMessage {
     docId: string
     serial: string
     snippet: string
+    filename?: string
+    score: number
   }>
   timestamp: Date
 }
@@ -156,11 +158,14 @@ export default function ChatPage() {
 
         const response = await api.post<ChatQueryResponse>('/chat/query', request)
         
+        // 소스를 관련도(점수) 순으로 정렬 (내림차순)
+        const sortedSources = response.data.sources?.sort((a, b) => (b.score || 0) - (a.score || 0)) || []
+        
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           type: 'assistant',
           content: response.data.answer,
-          sources: response.data.sources,
+          sources: sortedSources,
           timestamp: new Date()
         }
 
@@ -170,11 +175,14 @@ export default function ChatPage() {
         console.warn('Using mock API for /chat/query - backend not implemented yet')
         const mockResponse = await mockApi.chatQuery(userMessage.content)
         
+        // 소스를 관련도(점수) 순으로 정렬 (내림차순) - Mock API도 동일하게 처리
+        const sortedSources = mockResponse.sources?.sort((a, b) => (b.score || 0) - (a.score || 0)) || []
+        
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           type: 'assistant',
           content: mockResponse.answer,
-          sources: mockResponse.sources,
+          sources: sortedSources,
           timestamp: new Date()
         }
 
@@ -189,11 +197,14 @@ export default function ChatPage() {
         console.warn('Falling back to mock chat API')
         const mockResponse = await mockApi.chatQuery(userMessage.content)
         
+        // 소스를 관련도(점수) 순으로 정렬 (내림차순) - Fallback Mock API도 동일하게 처리
+        const sortedSources = mockResponse.sources?.sort((a, b) => (b.score || 0) - (a.score || 0)) || []
+        
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           type: 'assistant',
           content: mockResponse.answer,
-          sources: mockResponse.sources,
+          sources: sortedSources,
           timestamp: new Date()
         }
 
