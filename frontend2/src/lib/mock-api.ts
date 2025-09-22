@@ -58,7 +58,7 @@ export const mockApiResponses = {
 
   // Chat API Mock
   chatQuery: (query: string): ChatQueryResponse => ({
-    answer: `죄송합니다. RAG 채팅 기능은 아직 구현되지 않았습니다. 
+    answer: `죄송합니다. AI 채팅 기능은 아직 구현되지 않았습니다. 
 
 현재 질문: "${query}"
 

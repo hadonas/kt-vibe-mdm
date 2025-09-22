@@ -162,4 +162,11 @@ export const categoryApi = {
     api.post('/categories/force-regenerate-metadata'),
 }
 
+// Search API
+export const searchApi = {
+  // Reindex all documents
+  reindexDocuments: () =>
+    api.post('/search/reindex'),
+}
+
 export default api

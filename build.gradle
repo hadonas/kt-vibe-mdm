@@ -56,6 +56,11 @@ dependencies {
     // Vector search utilities
     implementation 'org.apache.commons:commons-math3:3.6.1'
     
+    // Elasticsearch for dense vector search
+    implementation 'org.elasticsearch.client:elasticsearch-rest-high-level-client:7.17.15'
+    implementation 'org.elasticsearch.client:elasticsearch-rest-client:7.17.15'
+    implementation 'org.elasticsearch:elasticsearch:7.17.15'
+    
     // JSON Processing
     implementation 'com.fasterxml.jackson.core:jackson-core'
     implementation 'com.fasterxml.jackson.core:jackson-annotations'
