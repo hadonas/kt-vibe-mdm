@@ -107,6 +107,14 @@ EMBEDDING_MODEL=text-embedding-3-small
 LLM_API_BASE=https://api.openai.com/v1
 LLM_MODEL=gpt-4
 AI_API_KEY=sk-your-openai-api-key
+ 
+# 벡터 검색 샤딩 및 검색 동작 (신규)
+VECTOR_SHARD_COUNT=4
+VECTOR_SEARCH_FANOUT=1                 # 기준 샤드 좌우 fanout 범위
+VECTOR_SEARCH_MIN_SUFFICIENT_RATIO=0.5 # 1차 결과 수 부족 시 전체 샤드 확장 임계 비율
+ 
+# 스마트 문서 분류 (카테고리 후보 개수 - 내부 topK는 *2 로 활용)
+CLASSIFICATION_CANDIDATE_COUNT=5
 ```
 
 #### Azure OpenAI

@@ -15,6 +15,8 @@ cp env.example .env
 # - ADMIN_PASSWORD
 # - MONGO_PASSWORD
 # - AI_API_KEY
+# - VECTOR_SHARD_COUNT / VECTOR_SEARCH_FANOUT / VECTOR_SEARCH_MIN_SUFFICIENT_RATIO
+# - CLASSIFICATION_CANDIDATE_COUNT (기본 5)
 ```
 
 #### 프론트엔드 환경 변수
@@ -166,6 +168,10 @@ docker-compose up -d
 | `ADMIN_PASSWORD` | `admin123` | 기본 관리자 비밀번호 |
 | `MONGO_URI` | `mongodb://...` | MongoDB 연결 URI |
 | `AI_API_KEY` | `` | OpenAI API 키 |
+| `VECTOR_SHARD_COUNT` | `4` | 벡터 샤드 개수 |
+| `VECTOR_SEARCH_FANOUT` | `1` | 1차 검색 시 기준 샤드 fanout |
+| `VECTOR_SEARCH_MIN_SUFFICIENT_RATIO` | `0.5` | 1차 결과 부족 판정 비율 |
+| `CLASSIFICATION_CANDIDATE_COUNT` | `5` | 카테고리 분류 후보 개수 (내부 탐색은 *2) |
 
 ### 프론트엔드 주요 환경 변수
 
