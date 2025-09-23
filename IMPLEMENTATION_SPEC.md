@@ -84,8 +84,8 @@ src/main/java/com/company/app/
 │   ├── controller/        # FileController
 │   └── service/           # LocalFileStorageService
 ├── search/                # 검색 기능
-│   ├── controller/        # VectorSearchController
-│   └── service/           # FaissVectorSearchService
+│   ├── controller/        # SearchController, ChatController
+│   └── service/           # ElasticsearchIndexService (샤드 인덱싱 & 하이브리드 검색)
 ├── chat/                  # RAG 채팅
 │   ├── controller/        # ChatController
 │   └── dto/               # DTOs
@@ -354,19 +354,36 @@ public ResponseEntity<Map<String, Object>> decideRequest(
 
 ### 6. 검색 및 RAG 시스템
 
-#### 벡터 검색
-```java
-@PostMapping("/reindex")
-public ResponseEntity<Map<String, String>> reindexAllDocuments() {
-    try {
-        faissVectorSearchService.reindexAllDocuments()
-        return ResponseEntity.ok(Map.of("message", "인덱스 재구성이 완료되었습니다."))
-    } catch (Exception e) {
-        return ResponseEntity.status(500)
-            .body(Map.of("error", "인덱스 재구성 중 오류가 발생했습니다."))
-    }
-}
+#### 샤드 기반 하이브리드 검색 (Elasticsearch)
+문서/카테고리 검색은 Elasticsearch 다중 샤드 인덱스(`mdm_document_chunks_shard_{i}`)를 사용하여 아래 절차로 수행됩니다:
+
+1. 쿼리 임베딩 생성 → 해시 기반 shardId 결정
+2. `VECTOR_SEARCH_FANOUT` (기본 1) 만큼 좌우 확장된 제한된 후보 샤드 집합 대상 벡터 + 텍스트 병행 검색
+3. 벡터 검색: `script_score` + `cosineSimilarity` (임계값: 문서 0.20, 카테고리 0.15)
+4. 텍스트 검색: `multi_match` (fields: title, content 등)
+5. 결과를 Reciprocal Rank Fusion(RRF)으로 결합
+6. 결과 수 < (요청 size * `VECTOR_SEARCH_MIN_SUFFICIENT_RATIO`) 이면 전체 샤드로 1회 재시도
+7. 여전히 부족하면 Plain match fallback 수행
+
+카테고리 추천은 동일한 메커니즘(`searchCategoriesHybrid`)을 사용하며, 후보 탐색 시 `CLASSIFICATION_CANDIDATE_COUNT * 2` 개를 기반으로 최종 상위 N(기본 5)을 반환합니다.
+
+제거/통합 사항:
+- FaissVectorSearchService 제거 (로컬 FAISS → Elasticsearch 전환)
+- VectorSearchService / ElasticsearchVectorSearchService 제거 (중복 계층 통합)
+- 단일 `ElasticsearchIndexService` 에 인덱싱 + 하이브리드 검색 로직 집중
+
+관련 환경변수 (env.example / application.yml):
 ```
+VECTOR_SHARD_COUNT=4
+VECTOR_SEARCH_FANOUT=1
+VECTOR_SEARCH_MIN_SUFFICIENT_RATIO=0.5
+CLASSIFICATION_CANDIDATE_COUNT=5
+```
+
+향후 개선 예정:
+- ANN(KNN) 전용 API 마이그레이션 (현재 dense_vector + script_score)
+- 동적 fanout & adaptive 임계값
+- reranker (cross-encoder / LLM) 추가
 
 #### RAG 채팅
 ```java

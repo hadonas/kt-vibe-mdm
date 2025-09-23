@@ -27,7 +27,7 @@ com.company.app
 ├── ingest        # 문서 수집 (개별/벌크)
 ├── repo          # 레포지토리 분석
 ├── approval      # 승인 워크플로우
-├── search        # Vector Search
+├── search        # 하이브리드 검색 (Elasticsearch 샤드 기반)
 ├── document      # 문서 관리
 ├── chat          # RAG 챗봇
 ├── file          # 파일 처리
@@ -44,8 +44,8 @@ com.company.app
 - **Docker** (컨테이너화)
 
 ### 데이터베이스
-- **MongoDB Atlas** (문서 저장)
-- **Atlas Vector Search** (유사도 검색)
+- **MongoDB** (문서/메타데이터)
+- **Elasticsearch** (샤드 기반 하이브리드 벡터 + BM25 검색)
 - **GridFS** (파일 저장)
 
 ## 🚀 빠른 시작
@@ -129,23 +129,22 @@ npm run build
 - **catalog_nodes**: 카탈로그 트리
 - **counters**: 일련번호 카운터
 
-### Vector Search 인덱스
+### 검색 아키텍처 (Shard-Aware Hybrid)
 
-```json
-{
-  "fields": [
-    {
-      "type": "vector",
-      "path": "vectors.purpose_768",
-      "numDimensions": 768,
-      "similarity": "cosine"
-    },
-    {
-      "type": "filter",
-      "path": "category.subCode"
-    }
-  ]
-}
+문서 청크 인덱스는 `mdm_document_chunks_shard_{0..N}` 형태로 분할되어 있으며 검색 시:
+1) 임베딩 → 기준 샤드 해시 계산
+2) 제한된 fanout 내 벡터 + 텍스트 동시 수행
+3) RRF 결합 후 부족 시 전체 샤드 확장
+4) fallback match 보강
+
+카테고리 분류 후보도 동일한 하이브리드 로직(`CLASSIFICATION_CANDIDATE_COUNT * 2`)을 거쳐 상위 5개(기본값)를 반환합니다.
+
+환경변수 요약:
+```
+VECTOR_SHARD_COUNT=4
+VECTOR_SEARCH_FANOUT=1
+VECTOR_SEARCH_MIN_SUFFICIENT_RATIO=0.5
+CLASSIFICATION_CANDIDATE_COUNT=5
 ```
 
 ## 🔧 환경 설정
@@ -173,8 +172,11 @@ MONGO_DB=mdm
 JWT_SECRET=mySecretKey
 JWT_ISSUER=app.local
 
-# Vector Search
-ATLAS_VECTOR_INDEX_PURPOSE=purpose_idx
+# Shard-Aware Vector Search
+VECTOR_SHARD_COUNT=4
+VECTOR_SEARCH_FANOUT=1
+VECTOR_SEARCH_MIN_SUFFICIENT_RATIO=0.5
+CLASSIFICATION_CANDIDATE_COUNT=5
 
 # AI Services
 EMBEDDING_API_BASE=http://localhost:11434

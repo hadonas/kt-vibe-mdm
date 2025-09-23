@@ -10,8 +10,16 @@ info:
     - 파일 관리 시스템 (업로드, 다운로드, 분석)
     - 승인 워크플로우 (승인 요청 조회, 승인/반려 결정, 통계)
     - 문서 관리 (문서 목록, 계층 구조, 카테고리별 조회, 중복 검사)
-    - 검색 및 채팅 (벡터 인덱스 재구성, RAG 채팅)
+  - 검색 및 채팅 (Elasticsearch 샤드 기반 하이브리드 벡터+텍스트 검색, RAG 채팅)
     - 공개 API (문서 수 조회, 파일 다운로드, 사용자별 문서 조회)
+    
+  검색 아키텍처 개요:
+  - 다중 샤드 인덱스: mdm_document_chunks_shard_{i}
+  - 단계 1: 임베딩 → 해시 기반 기준 샤드 계산
+  - 단계 2: 제한 fanout(`VECTOR_SEARCH_FANOUT`) 범위 내 벡터+텍스트 동시 검색
+  - 단계 3: RRF 결합, 결과 부족 시 전체 샤드 확대 (`VECTOR_SEARCH_MIN_SUFFICIENT_RATIO`)
+  - 단계 4: fallback match 보강
+  - 카테고리 추천: CLASSIFICATION_CANDIDATE_COUNT (=5) * 2 후보 검색 후 상위 5 반환
   version: 1.0.0
   contact:
     name: MDM Team
@@ -571,10 +579,10 @@ paths:
   /search/reindex:
     post:
       tags: [Search]
-      summary: 벡터 인덱스 재구성
+    summary: Elasticsearch 샤드 인덱스 재구성 (임베딩 재계산 & 재색인)
       responses:
         '200':
-          description: 인덱스 재구성 완료
+      description: 샤드 기반 하이브리드 검색 인덱스 재구성 완료
           content:
             application/json:
               schema:
