@@ -3,8 +3,10 @@ package com.company.app.search.service;
 import com.company.app.catalog.entity.CatalogNode;
 import com.company.app.catalog.repository.CatalogNodeRepository;
 import com.company.app.document.entity.DocumentEntity;
+import com.company.app.document.entity.DocumentChunk;
 import com.company.app.document.repository.DocumentRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.company.app.document.repository.DocumentChunkRepository;
+import com.company.app.search.util.VectorShardingUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
@@ -26,12 +28,17 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.xcontent.XContentType;
+
+import java.util.*;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.IOException;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * Elasticsearch 인덱스 관리 및 데이터 동기화 서비스
@@ -40,16 +47,52 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 public class ElasticsearchIndexService {
-    
+
     private final RestHighLevelClient elasticsearchClient;
     private final DocumentRepository documentRepository;
     private final CatalogNodeRepository catalogNodeRepository;
     private final EmbeddingService embeddingService;
-    private final ObjectMapper objectMapper;
-    
+    private final DocumentChunkRepository chunkRepository;
+    private final VectorShardingUtil shardingUtil;
+
+    // 샤드 관련 설정
+    @Value("${vector.shard.count:4}")
+    private int shardCount;
+
+    @Value("${vector.search.fanout:1}")
+    private int shardFanout;
+
+    @Value("${vector.search.min.sufficient.ratio:0.5}")
+    private double minSufficientRatio;
+
     // 인덱스 이름
     private static final String CATEGORIES_INDEX = "mdm_categories";
-    private static final String CHUNKS_INDEX = "mdm_document_chunks"; // 청크 인덱스만 유지
+    private static final String CHUNKS_INDEX = "mdm_document_chunks"; // (단일 인덱스 - 과거 호환)
+    private static final String SHARD_INDEX_PREFIX = "mdm_document_chunks_shard_"; // 샤드 인덱스 prefix
+    private static final String SHARD_INDEX_WILDCARD = SHARD_INDEX_PREFIX + "*"; // 검색 시 사용
+
+    /**
+     * 샤드 인덱스 이름 생성
+     */
+    private String getShardIndexName(int shardId) {
+        return SHARD_INDEX_PREFIX + shardId;
+    }
+
+    private List<String> resolveShardIndices(int baseShard) {
+        List<String> indices = new ArrayList<>();
+        for (int d = -shardFanout; d <= shardFanout; d++) {
+            int s = baseShard + d;
+            if (s < 0 || s >= shardCount) continue;
+            indices.add(getShardIndexName(s));
+        }
+        return indices;
+    }
+
+    private List<String> allShardIndices() {
+        List<String> all = new ArrayList<>();
+        for (int i = 0; i < shardCount; i++) all.add(getShardIndexName(i));
+        return all;
+    }
     
     /**
      * 애플리케이션 시작 시 인덱스 초기화
@@ -358,11 +401,46 @@ public class ElasticsearchIndexService {
     }
     
     /**
-     * 청크 데이터 Elasticsearch 색인
+     * 청크 데이터 샤드별 Elasticsearch 색인
      */
     public void indexChunks(List<com.company.app.document.entity.DocumentChunk> chunks) {
         if (chunks == null || chunks.isEmpty()) return;
         try {
+            // 샤드별로 청크 그룹화
+            Map<Integer, List<com.company.app.document.entity.DocumentChunk>> chunksByShardId = new HashMap<>();
+            
+            for (var chunk : chunks) {
+                // 청크의 임베딩을 기반으로 샤드 ID 계산
+                int shardId = 0; // 기본값
+                if (chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty()) {
+                    shardId = shardingUtil.calculateShardId(chunk.getEmbedding());
+                }
+                
+                chunksByShardId.computeIfAbsent(shardId, k -> new java.util.ArrayList<>()).add(chunk);
+            }
+            
+            // 샤드별로 별도 인덱스에 저장
+            for (Map.Entry<Integer, List<com.company.app.document.entity.DocumentChunk>> entry : chunksByShardId.entrySet()) {
+                int shardId = entry.getKey();
+                List<com.company.app.document.entity.DocumentChunk> shardChunks = entry.getValue();
+                
+                String shardIndexName = CHUNKS_INDEX + "_shard_" + shardId;
+                indexChunksToShard(shardChunks, shardIndexName, shardId);
+            }
+            
+        } catch (Exception e) { 
+            log.error("샤드별 청크 색인 실패", e); 
+        }
+    }
+    
+    /**
+     * 특정 샤드 인덱스에 청크들 색인
+     */
+    private void indexChunksToShard(List<com.company.app.document.entity.DocumentChunk> chunks, String indexName, int shardId) {
+        try {
+            // 샤드 인덱스가 없으면 생성
+            createShardIndexIfNotExists(indexName);
+            
             BulkRequest bulk = new BulkRequest();
             for (var ch : chunks) {
                 Map<String,Object> m = new java.util.HashMap<>();
@@ -371,32 +449,200 @@ public class ElasticsearchIndexService {
                 m.put("content", ch.getContent());
                 m.put("sectionHint", ch.getSectionHint());
                 m.put("tokenCount", ch.getTokenCount());
+                m.put("shardId", shardId);  // 샤드 ID 추가
                 if (ch.getEmbedding() != null) m.put("embedding", ch.getEmbedding());
                 m.put("createdAt", ch.getCreatedAt());
-                IndexRequest ir = new IndexRequest(CHUNKS_INDEX)
+                
+                IndexRequest ir = new IndexRequest(indexName)
                         .id(ch.getDocumentId()+"_"+ch.getChunkIndex())
                         .source(m, XContentType.JSON);
                 bulk.add(ir);
             }
-            if (bulk.numberOfActions()>0) {
+            
+            if (bulk.numberOfActions() > 0) {
                 BulkResponse resp = elasticsearchClient.bulk(bulk, RequestOptions.DEFAULT);
-                if (resp.hasFailures()) log.warn("청크 배치 색인 실패 있음: {}", resp.buildFailureMessage());
+                if (resp.hasFailures()) {
+                    log.warn("샤드 {} 청크 배치 색인 실패 있음: {}", shardId, resp.buildFailureMessage());
+                } else {
+                    log.info("샤드 {} 청크 {}개 색인 완료", shardId, chunks.size());
+                }
             }
-        } catch (Exception e) { log.error("청크 색인 실패", e); }
+        } catch (Exception e) { 
+            log.error("샤드 {} 청크 색인 실패", shardId, e); 
+        }
     }
     
     /**
-     * 특정 문서 ID에 대한 청크 삭제 (미구현)
+     * 샤드 인덱스가 없으면 생성
+     */
+    private void createShardIndexIfNotExists(String indexName) {
+        try {
+            GetIndexRequest getIndexRequest = new GetIndexRequest(indexName);
+            boolean exists = elasticsearchClient.indices().exists(getIndexRequest, RequestOptions.DEFAULT);
+            if (exists) return;
+            
+            Map<String,Object> mapping = new java.util.HashMap<>();
+            Map<String,Object> properties = new java.util.HashMap<>();
+            properties.put("documentId", java.util.Map.of("type","keyword"));
+            properties.put("chunkIndex", java.util.Map.of("type","integer"));
+            properties.put("content", java.util.Map.of("type","text","analyzer","standard"));
+            properties.put("sectionHint", java.util.Map.of("type","text","analyzer","standard"));
+            properties.put("tokenCount", java.util.Map.of("type","integer"));
+            properties.put("shardId", java.util.Map.of("type","integer"));
+            properties.put("embedding", java.util.Map.of("type","dense_vector","dims",1536,"index",true,"similarity","cosine"));
+            properties.put("createdAt", java.util.Map.of("type","date"));
+            mapping.put("properties", properties);
+            
+            CreateIndexRequest createIndexRequest = new CreateIndexRequest(indexName);
+            createIndexRequest.mapping(mapping);
+            elasticsearchClient.indices().create(createIndexRequest, RequestOptions.DEFAULT);
+            
+            log.info("샤드 인덱스 생성 완료: {}", indexName);
+        } catch (Exception e) { 
+            log.error("샤드 인덱스 생성 실패: {}", indexName, e); 
+        }
+    }
+    
+    /**
+     * 기존 MongoDB 청크들을 샤드별 Elasticsearch 인덱스로 마이그레이션
+     */
+    public void migrateChunksToShards() {
+        try {
+            log.info("청크 샤드 마이그레이션 시작");
+            
+            // MongoDB에서 모든 청크 조회
+            List<com.company.app.document.entity.DocumentChunk> allChunks = chunkRepository.findAll();
+            
+            if (allChunks.isEmpty()) {
+                log.info("마이그레이션할 청크가 없음");
+                return;
+            }
+            
+            log.info("총 {}개 청크 마이그레이션 시작", allChunks.size());
+            
+            // 기존 청크 인덱스 삭제 (옵션)
+            deleteIndexIfExists(CHUNKS_INDEX);
+            
+            // 청크들을 샤드별로 인덱싱
+            indexChunks(allChunks);
+            
+            log.info("청크 샤드 마이그레이션 완료: {}개 청크", allChunks.size());
+            
+        } catch (Exception e) {
+            log.error("청크 샤드 마이그레이션 실패", e);
+        }
+    }
+    
+    /**
+     * 모든 샤드 인덱스 재생성
+     */
+    public void recreateShardIndexes() {
+        try {
+            log.info("샤드 인덱스 재생성 시작");
+            
+            // 기존 샤드 인덱스들 삭제
+            for (int shardId = 0; shardId < shardingUtil.getDefaultShardCount(); shardId++) {
+                String shardIndexName = CHUNKS_INDEX + "_shard_" + shardId;
+                deleteIndexIfExists(shardIndexName);
+            }
+            
+            // 기존 통합 청크 인덱스도 삭제
+            deleteIndexIfExists(CHUNKS_INDEX);
+            
+            // 청크 마이그레이션 실행
+            migrateChunksToShards();
+            
+            log.info("샤드 인덱스 재생성 완료");
+            
+        } catch (Exception e) {
+            log.error("샤드 인덱스 재생성 실패", e);
+        }
+    }
+    
+    /**
+     * 특정 문서 ID에 대한 청크 삭제 (샤드 기반)
      */
     public void deleteChunksByDocumentId(String documentId) {
         try {
-            DeleteByQueryRequest request = new DeleteByQueryRequest(CHUNKS_INDEX);
-            request.setQuery(QueryBuilders.termQuery("documentId", documentId));
-            request.setConflicts("proceed");
-            BulkByScrollResponse response = elasticsearchClient.deleteByQuery(request, RequestOptions.DEFAULT);
-            log.info("청크 삭제 완료 docId={} deleted={} status={}", documentId, response.getDeleted(), response.getStatus());
+            log.info("문서 청크 삭제 시작: {}", documentId);
+            
+            // MongoDB에서 해당 문서의 청크들을 먼저 조회하여 샤드 정보 파악
+            List<DocumentChunk> chunks = chunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
+            
+            log.info("MongoDB에서 찾은 청크 개수: {}, documentId: {}", chunks.size(), documentId);
+            
+            if (chunks.isEmpty()) {
+                log.warn("MongoDB에 청크가 없어서 Elasticsearch 샤드별 삭제를 시도합니다: {}", documentId);
+                // MongoDB에 청크가 없어도 Elasticsearch에는 있을 수 있으므로 모든 샤드에서 삭제 시도
+                int totalDeleted = 0;
+                for (int shardId = 0; shardId < shardingUtil.getDefaultShardCount(); shardId++) {
+                    try {
+                        String shardIndexName = getShardIndexName(shardId);
+                        DeleteByQueryRequest request = new DeleteByQueryRequest(shardIndexName);
+                        request.setQuery(QueryBuilders.termQuery("documentId", documentId));
+                        request.setConflicts("proceed");
+                        
+                        BulkByScrollResponse response = elasticsearchClient.deleteByQuery(request, RequestOptions.DEFAULT);
+                        int deleted = (int) response.getDeleted();
+                        totalDeleted += deleted;
+                        
+                        if (deleted > 0) {
+                            log.info("샤드 {}에서 청크 삭제: documentId={}, deleted={}", shardId, documentId, deleted);
+                        }
+                    } catch (Exception e) {
+                        log.warn("샤드 {}에서 청크 삭제 실패: documentId={}, error={}", shardId, documentId, e.getMessage());
+                    }
+                }
+                log.info("전체 샤드 검색 완료: documentId={}, totalDeleted={}", documentId, totalDeleted);
+                return;
+            }
+            
+            // 샤드별로 그룹화
+            Map<Integer, List<DocumentChunk>> chunksByShard = chunks.stream()
+                .collect(Collectors.groupingBy(chunk -> 
+                    shardingUtil.calculateShardId(chunk.getEmbedding())));
+            
+            int totalDeleted = 0;
+            
+            // 각 샤드에서 청크 삭제
+            for (Map.Entry<Integer, List<DocumentChunk>> entry : chunksByShard.entrySet()) {
+                int shardId = entry.getKey();
+                
+                try {
+                    String shardIndexName = getShardIndexName(shardId);
+                    
+                    // 샤드별 인덱스에서 청크 삭제
+                    DeleteByQueryRequest request = new DeleteByQueryRequest(shardIndexName);
+                    request.setQuery(QueryBuilders.termQuery("documentId", documentId));
+                    request.setConflicts("proceed");
+                    
+                    BulkByScrollResponse response = elasticsearchClient.deleteByQuery(request, RequestOptions.DEFAULT);
+                    totalDeleted += (int) response.getDeleted();
+                    
+                    log.info("샤드 {}에서 청크 삭제 완료: documentId={}, deleted={}", 
+                        shardId, documentId, response.getDeleted());
+                    
+                } catch (Exception e) {
+                    log.warn("샤드 {}에서 청크 삭제 실패: documentId={}, error={}", 
+                        shardId, documentId, e.getMessage());
+                }
+            }
+            
+            log.info("문서 청크 삭제 완료: documentId={}, totalDeleted={}, shardsAffected={}", 
+                documentId, totalDeleted, chunksByShard.size());
+            
         } catch (Exception e) {
-            log.warn("청크 삭제 실패 docId={} error={}", documentId, e.getMessage());
+            log.error("문서 청크 삭제 실패: documentId={}", documentId, e);
+            // 기존 방식으로 fallback
+            try {
+                DeleteByQueryRequest request = new DeleteByQueryRequest(CHUNKS_INDEX);
+                request.setQuery(QueryBuilders.termQuery("documentId", documentId));
+                request.setConflicts("proceed");
+                BulkByScrollResponse response = elasticsearchClient.deleteByQuery(request, RequestOptions.DEFAULT);
+                log.info("Fallback 청크 삭제 완료: docId={}, deleted={}", documentId, response.getDeleted());
+            } catch (Exception fallbackException) {
+                log.warn("Fallback 청크 삭제도 실패: docId={}", documentId, fallbackException);
+            }
         }
     }
 
@@ -407,25 +653,53 @@ public class ElasticsearchIndexService {
      */
     public List<ChunkSearchHit> searchChunks(String query, int topK) {
         try {
-            log.info("하이브리드 검색 실행: query={}, topK={}", query, topK);
-            
-            // 1. 벡터 검색 수행
-            List<ChunkSearchHit> vectorResults = performVectorSearch(query, topK * 2);
-            
-            // 2. 텍스트 검색 수행
-            List<ChunkSearchHit> textResults = performTextSearch(query, topK * 2);
-            
-            // 3. RRF (Reciprocal Rank Fusion) 적용
+            log.info("하이브리드 검색 실행: query='{}', topK={}", query, topK);
+
+            // 1. 벡터 + 2. 텍스트 검색 (샤드 와일드카드 사용)
+            List<ChunkSearchHit> vectorResults = performVectorSearch(query, topK * 3); // 더 넉넉히 가져와 RRF 다양성 확보
+            List<ChunkSearchHit> textResults = performTextSearch(query, topK * 3);
+
+            log.info("원시 검색 결과: vectorRaw={}, textRaw={}", vectorResults.size(), textResults.size());
+
+            // 3. RRF 융합
             List<ChunkSearchHit> hybridResults = applyRRF(vectorResults, textResults, topK);
-            
-            log.info("하이브리드 검색 완료: vector={}, text={}, hybrid={}", 
-                vectorResults.size(), textResults.size(), hybridResults.size());
-            
+            log.info("RRF 결과: hybrid={} (요청 topK={})", hybridResults.size(), topK);
+
+            // 4. 하이브리드 결과 없음 -> 단순 match fallback
+            if (hybridResults.isEmpty()) {
+                log.warn("하이브리드 결과 없음. fallback 단순 match 검색 수행");
+                List<ChunkSearchHit> fallback = performPlainMatchSearch(query, topK);
+                log.info("Fallback 결과: {}", fallback.size());
+                return fallback;
+            }
             return hybridResults;
         } catch (Exception e) {
-            log.error("하이브리드 청크 검색 실패", e);
-            return java.util.Collections.emptyList();
+            log.error("하이브리드 청크 검색 실패 - fallback 시도", e);
+            try {
+                return performPlainMatchSearch(query, topK);
+            } catch (Exception inner) {
+                log.error("Fallback 검색도 실패", inner);
+                return java.util.Collections.emptyList();
+            }
         }
+    }
+
+    /**
+     * 단순 match 검색 fallback (content 필드)
+     */
+    private List<ChunkSearchHit> performPlainMatchSearch(String query, int size) throws IOException {
+        SearchSourceBuilder ssb = new SearchSourceBuilder()
+            .query(QueryBuilders.matchQuery("content", query))
+            .size(size)
+            .fetchSource(new String[]{"content","documentId","chunkIndex","documentSerial","sectionHint"}, null);
+
+        SearchRequest sr = new SearchRequest(SHARD_INDEX_WILDCARD).source(ssb);
+        SearchResponse resp = elasticsearchClient.search(sr, RequestOptions.DEFAULT);
+        List<ChunkSearchHit> list = new ArrayList<>();
+        for (SearchHit hit : resp.getHits().getHits()) {
+            list.add(createChunkSearchHit(hit, "fallback-text"));
+        }
+        return list;
     }
     
     /**
@@ -434,67 +708,95 @@ public class ElasticsearchIndexService {
     private List<ChunkSearchHit> performVectorSearch(String query, int size) {
         try {
             List<Double> embedding = embeddingService.generateEmbedding(query);
-            
-            // 벡터 검색 임계값 0.2 → 0.25로 상향
-            Map<String,Object> params = new HashMap<>();
-            params.put("query_vector", embedding);
-            params.put("threshold", 0.20);
-            
-            // 임계값을 적용한 스크립트 (코사인 유사도 + 1.0 보정, 임계값 이상만 반환)
-            Script script = new Script(ScriptType.INLINE, "painless", 
-                "double score = cosineSimilarity(params.query_vector, 'embedding') + 1.0; " +
-                "return score >= params.threshold + 1.0 ? score : 0.0", params);
+            int baseShard = shardingUtil.calculateShardId(embedding); // 기준 샤드
+            List<String> candidateIndices = resolveShardIndices(baseShard);
 
-            SearchSourceBuilder ssb = new SearchSourceBuilder()
-                    .size(size)
-                    .query(QueryBuilders.scriptScoreQuery(QueryBuilders.matchAllQuery(), script))
-                    .fetchSource(new String[]{"documentId","chunkIndex","content","sectionHint"}, null);
+            double threshold = 0.20; // 기존 임계값 유지 (score: 1.0 + threshold)
+            List<ChunkSearchHit> results = vectorSearchInternal(embedding, candidateIndices, size, threshold);
+            log.debug("벡터 1차(shards={}) 결과 {}개", candidateIndices, results.size());
 
-            SearchRequest sr = new SearchRequest(CHUNKS_INDEX).source(ssb);
-            SearchResponse resp = elasticsearchClient.search(sr, RequestOptions.DEFAULT);
-
-            List<ChunkSearchHit> results = new java.util.ArrayList<>();
-            for (SearchHit hit : resp.getHits().getHits()) {
-                // 임계값 미달 결과 필터링
-                if (hit.getScore() < 1.20) continue; // 1.0 + 0.20 임계값
-
-                ChunkSearchHit ch = createChunkSearchHit(hit, "vector");
-                results.add(ch);
+            // 결과가 충분치 않으면 전체 샤드 확장
+            if (results.size() < size * minSufficientRatio) {
+                List<String> all = allShardIndices();
+                if (all.size() > candidateIndices.size()) {
+                    log.info("벡터 결과 부족({} < {}) → 전체 샤드 확장", results.size(), (int)(size * minSufficientRatio));
+                    results = vectorSearchInternal(embedding, all, size, threshold);
+                    log.debug("벡터 확장 결과 {}개", results.size());
+                }
             }
-
-            log.debug("벡터 검색 결과: {}개 (임계값 0.20 적용)", results.size());
             return results;
         } catch (Exception e) {
             log.error("벡터 검색 실패", e);
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
     }
-    
-    /**
-     * 텍스트 검색 수행
-     */
+
+    private List<ChunkSearchHit> vectorSearchInternal(List<Double> embedding, List<String> indices, int size, double threshold) throws IOException {
+        if (indices.isEmpty()) return Collections.emptyList();
+
+        Map<String,Object> params = new HashMap<>();
+        params.put("query_vector", embedding);
+        params.put("threshold", threshold);
+        Script script = new Script(ScriptType.INLINE, "painless",
+                "double score = cosineSimilarity(params.query_vector, 'embedding') + 1.0; return score >= params.threshold + 1.0 ? score : 0.0",
+                params);
+
+        SearchSourceBuilder ssb = new SearchSourceBuilder()
+                .size(size)
+                .query(QueryBuilders.scriptScoreQuery(QueryBuilders.matchAllQuery(), script))
+                .fetchSource(new String[]{"documentId","chunkIndex","content","sectionHint"}, null);
+
+        SearchRequest sr = new SearchRequest(indices.toArray(new String[0])).source(ssb);
+        SearchResponse resp = elasticsearchClient.search(sr, RequestOptions.DEFAULT);
+
+        List<ChunkSearchHit> list = new ArrayList<>();
+        for (SearchHit hit : resp.getHits().getHits()) {
+            if (hit.getScore() < 1.0 + threshold) continue; // 필터
+            list.add(createChunkSearchHit(hit, "vector"));
+        }
+        return list;
+    }
+
     private List<ChunkSearchHit> performTextSearch(String query, int size) {
         try {
-            SearchSourceBuilder ssb = new SearchSourceBuilder()
-                    .size(size)
-                    .query(QueryBuilders.multiMatchQuery(query, "content", "sectionHint"))
-                    .fetchSource(new String[]{"documentId","chunkIndex","content","sectionHint"}, null);
+            // 동일한 샤드 범위 적용 (임베딩 재계산 비용은 소량 쿼리이므로 허용)
+            List<Double> embedding = embeddingService.generateEmbedding(query);
+            int baseShard = shardingUtil.calculateShardId(embedding);
+            List<String> candidateIndices = resolveShardIndices(baseShard);
 
-            SearchRequest sr = new SearchRequest(CHUNKS_INDEX).source(ssb);
-            SearchResponse resp = elasticsearchClient.search(sr, RequestOptions.DEFAULT);
+            List<ChunkSearchHit> results = textSearchInternal(query, candidateIndices, size);
+            log.debug("텍스트 1차(shards={}) 결과 {}개", candidateIndices, results.size());
 
-            List<ChunkSearchHit> results = new java.util.ArrayList<>();
-            for (SearchHit hit : resp.getHits().getHits()) {
-                ChunkSearchHit ch = createChunkSearchHit(hit, "text");
-                results.add(ch);
+            if (results.size() < size * minSufficientRatio) {
+                List<String> all = allShardIndices();
+                if (all.size() > candidateIndices.size()) {
+                    log.info("텍스트 결과 부족({} < {}) → 전체 샤드 확장", results.size(), (int)(size * minSufficientRatio));
+                    results = textSearchInternal(query, all, size);
+                    log.debug("텍스트 확장 결과 {}개", results.size());
+                }
             }
-            
-            log.debug("텍스트 검색 결과: {}개", results.size());
             return results;
         } catch (Exception e) {
             log.error("텍스트 검색 실패", e);
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
+    }
+
+    private List<ChunkSearchHit> textSearchInternal(String query, List<String> indices, int size) throws IOException {
+        if (indices.isEmpty()) return Collections.emptyList();
+
+        SearchSourceBuilder ssb = new SearchSourceBuilder()
+                .size(size)
+                .query(QueryBuilders.multiMatchQuery(query, "content", "sectionHint"))
+                .fetchSource(new String[]{"documentId","chunkIndex","content","sectionHint"}, null);
+
+        SearchRequest sr = new SearchRequest(indices.toArray(new String[0])).source(ssb);
+        SearchResponse resp = elasticsearchClient.search(sr, RequestOptions.DEFAULT);
+        List<ChunkSearchHit> list = new ArrayList<>();
+        for (SearchHit hit : resp.getHits().getHits()) {
+            list.add(createChunkSearchHit(hit, "text"));
+        }
+        return list;
     }
     
     /**

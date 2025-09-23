@@ -356,6 +356,14 @@ public class AdminController {
             for (DocumentEntity document : documentsToDelete) {
                 try {
                     
+                    // 1. Elasticsearch 청크 삭제 (MongoDB 삭제 전에 실행)
+                    try {
+                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
+                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
+                    }
+                    
                     // 2. MongoDB 청크 삭제
                     try {
                         chunkRepository.deleteByDocumentId(document.getId());
@@ -373,20 +381,12 @@ public class AdminController {
                         // Elasticsearch 실패는 전체 실패로 처리하지 않음
                     }
                     
-                    // 4. Elasticsearch 청크 삭제
-                    try {
-                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
-                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
-                    }
-                    
-                    // 5. MongoDB에서 문서 삭제
+                    // 4. MongoDB에서 문서 삭제
                     documentRepository.delete(document);
                     deletedCount++;
                     log.info("MongoDB에서 문서 삭제: {}", document.getId());
                     
-                    // 6. 파일시스템에서 파일 삭제
+                    // 5. 파일시스템에서 파일 삭제
                     if (localFileStorageService.deleteDocumentFile(document)) {
                         fileDeletedCount++;
                         log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial() != null ? document.getSerial().getFull() : document.getId());
@@ -455,6 +455,14 @@ public class AdminController {
             for (DocumentEntity document : documents) {
                 try {
                     
+                    // 1. Elasticsearch 청크 삭제 (MongoDB 삭제 전에 실행)
+                    try {
+                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
+                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
+                    } catch (Exception e) {
+                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
+                    }
+                    
                     // 2. MongoDB 청크 삭제
                     try {
                         chunkRepository.deleteByDocumentId(document.getId());
@@ -472,20 +480,12 @@ public class AdminController {
                         // Elasticsearch 실패는 전체 실패로 처리하지 않음
                     }
                     
-                    // 4. Elasticsearch 청크 삭제
-                    try {
-                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
-                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
-                    }
-                    
-                    // 5. MongoDB에서 문서 삭제
+                    // 4. MongoDB에서 문서 삭제
                     documentRepository.delete(document);
                     deletedCount++;
                     log.info("MongoDB에서 문서 삭제: {}", document.getId());
                     
-                    // 6. 파일시스템에서 파일 삭제
+                    // 5. 파일시스템에서 파일 삭제
                     if (localFileStorageService.deleteDocumentFile(document)) {
                         fileDeletedCount++;
                         log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial().getFull());
