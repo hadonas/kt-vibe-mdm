@@ -105,7 +105,7 @@ llm:
 
 # Smart Classification Configuration
 classification:
-  candidate-count: ${CLASSIFICATION_CANDIDATE_COUNT:10}
+  candidate-count: ${CLASSIFICATION_CANDIDATE_COUNT:5}
   confidence-threshold: ${CLASSIFICATION_CONFIDENCE_THRESHOLD:0.8}
   bm25-weight: ${CLASSIFICATION_BM25_WEIGHT:0.3}
   vector-weight: ${CLASSIFICATION_VECTOR_WEIGHT:0.7}

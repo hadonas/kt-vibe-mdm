@@ -882,4 +882,120 @@ public class ElasticsearchIndexService {
         private String documentSerial;
         private String documentPurpose;
     }
+
+    /* ===================== 카테고리 하이브리드 검색 (vector + text + RRF) ===================== */
+
+    @lombok.Data
+    public static class CategorySearchHit {
+        private String id;
+        private String code;
+        private String name;
+        private String description;
+        private Double score; // RRF 최종 점수
+        private Double vectorScore; // 원시 vector score (선택적)
+        private Double textScore;   // 원시 text score (선택적)
+    }
+
+    public List<CategorySearchHit> searchCategoriesHybrid(String query, int topK) {
+        try {
+            log.info("카테고리 하이브리드 검색 실행: query='{}', topK={}", query, topK);
+            List<CategorySearchHit> vector = performCategoryVectorSearch(query, topK * 3);
+            List<CategorySearchHit> text = performCategoryTextSearch(query, topK * 3);
+            List<CategorySearchHit> fused = applyRRFCategories(vector, text, topK);
+            if (fused.isEmpty()) {
+                log.warn("카테고리 하이브리드 결과 없음 - 텍스트 fallback");
+                return performCategoryTextSearch(query, topK);
+            }
+            return fused;
+        } catch (Exception e) {
+            log.error("카테고리 하이브리드 검색 실패", e);
+            try { return performCategoryTextSearch(query, topK); } catch (Exception ex) { return Collections.emptyList(); }
+        }
+    }
+
+    private List<CategorySearchHit> performCategoryVectorSearch(String query, int size) {
+        try {
+            List<Double> embedding = embeddingService.generateEmbedding(query);
+            double threshold = 0.25; // 카테고리는 더 느슨하게
+            Map<String,Object> params = new HashMap<>();
+            params.put("query_vector", embedding);
+            params.put("threshold", threshold);
+            Script script = new Script(ScriptType.INLINE, "painless",
+                    "double s = cosineSimilarity(params.query_vector, 'vector') + 1.0; return s >= params.threshold + 1.0 ? s : 0.0", params);
+            SearchSourceBuilder ssb = new SearchSourceBuilder()
+                    .size(size)
+                    .query(org.elasticsearch.index.query.QueryBuilders.scriptScoreQuery(org.elasticsearch.index.query.QueryBuilders.matchAllQuery(), script))
+                    .fetchSource(new String[]{"id","code","name","description"}, null);
+            SearchRequest sr = new SearchRequest(CATEGORIES_INDEX).source(ssb);
+            SearchResponse resp = elasticsearchClient.search(sr, RequestOptions.DEFAULT);
+            List<CategorySearchHit> list = new ArrayList<>();
+            for (SearchHit hit : resp.getHits()) {
+                if (hit.getScore() < 1.0 + threshold) continue;
+                CategorySearchHit ch = createCategoryHit(hit);
+                ch.setVectorScore((double) hit.getScore());
+                list.add(ch);
+            }
+            return list;
+        } catch (Exception e) {
+            log.error("카테고리 벡터 검색 실패", e);
+            return Collections.emptyList();
+        }
+    }
+
+    private List<CategorySearchHit> performCategoryTextSearch(String query, int size) {
+        try {
+            SearchSourceBuilder ssb = new SearchSourceBuilder()
+                    .size(size)
+                    .query(org.elasticsearch.index.query.QueryBuilders.multiMatchQuery(query,
+                            "name","description","aliases","includeKeywords","examplePhrases"))
+                    .fetchSource(new String[]{"id","code","name","description"}, null);
+            SearchRequest sr = new SearchRequest(CATEGORIES_INDEX).source(ssb);
+            SearchResponse resp = elasticsearchClient.search(sr, RequestOptions.DEFAULT);
+            List<CategorySearchHit> list = new ArrayList<>();
+            for (SearchHit hit : resp.getHits()) {
+                CategorySearchHit ch = createCategoryHit(hit);
+                ch.setTextScore((double) hit.getScore());
+                list.add(ch);
+            }
+            return list;
+        } catch (Exception e) {
+            log.error("카테고리 텍스트 검색 실패", e);
+            return Collections.emptyList();
+        }
+    }
+
+    private List<CategorySearchHit> applyRRFCategories(List<CategorySearchHit> vectorResults, List<CategorySearchHit> textResults, int topK) {
+        Map<String, CategorySearchHit> map = new HashMap<>();
+        Map<String, Double> scores = new HashMap<>();
+        double k = 60.0;
+        for (int i = 0; i < vectorResults.size(); i++) {
+            CategorySearchHit h = vectorResults.get(i);
+            String id = h.getId();
+            double r = 1.0 / (k + i + 1);
+            scores.put(id, scores.getOrDefault(id, 0.0) + r);
+            map.put(id, h);
+        }
+        for (int i = 0; i < textResults.size(); i++) {
+            CategorySearchHit h = textResults.get(i);
+            String id = h.getId();
+            double r = 1.0 / (k + i + 1);
+            scores.put(id, scores.getOrDefault(id, 0.0) + r);
+            map.putIfAbsent(id, h);
+        }
+        return scores.entrySet().stream()
+                .sorted(Map.Entry.<String,Double>comparingByValue().reversed())
+                .limit(topK)
+                .map(e -> { CategorySearchHit h = map.get(e.getKey()); h.setScore(e.getValue()); return h; })
+                .collect(Collectors.toList());
+    }
+
+    private CategorySearchHit createCategoryHit(SearchHit hit) {
+        Map<String,Object> src = hit.getSourceAsMap();
+        CategorySearchHit ch = new CategorySearchHit();
+        ch.setId((String) src.get("id"));
+        ch.setCode((String) src.get("code"));
+        ch.setName((String) src.get("name"));
+        ch.setDescription((String) src.get("description"));
+        return ch;
+    }
 }
