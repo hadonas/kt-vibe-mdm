@@ -107,16 +107,44 @@ export default function AdminPage() {
     }
   }, [token]);
 
+  // 내부 데이터 로딩 함수들 (로딩 상태 설정하지 않음)
+  const loadCategories = async () => {
+    const response = await categoryApi.getCategories();
+    setCategories(response.data.categories || []);
+  };
+
+  const loadDocumentCounts = async () => {
+    const response = await categoryApi.getDocumentCounts();
+    setDocumentCounts(response.data.documentCounts || {});
+  };
+
   const fetchCategories = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const response = await categoryApi.getCategories();
-      setCategories(response.data.categories || []);
+      await loadCategories();
     } catch (err) {
       console.error('Fetch categories error:', err);
       setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 카테고리와 문서 개수를 함께 새로고침하는 함수
+  const refreshCategoriesAndCounts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // 병렬로 실행하여 성능 개선
+      await Promise.all([
+        loadCategories(),
+        loadDocumentCounts()
+      ]);
+    } catch (err) {
+      console.error('Refresh categories and counts error:', err);
+      setError(err instanceof Error ? err.message : '데이터 새로고침 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -132,8 +160,7 @@ export default function AdminPage() {
 
   const fetchDocumentCounts = async () => {
     try {
-      const response = await categoryApi.getDocumentCounts();
-      setDocumentCounts(response.data.documentCounts || {});
+      await loadDocumentCounts();
     } catch (err) {
       console.error('Fetch document counts error:', err);
       // 문서 개수 조회 실패는 치명적이지 않으므로 에러 상태를 설정하지 않음
@@ -349,7 +376,7 @@ export default function AdminPage() {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold">카테고리 계층 구조</h2>
                 <div className="flex space-x-2">
-                  <Button onClick={fetchCategories} disabled={loading} size="sm">
+                  <Button onClick={refreshCategoriesAndCounts} disabled={loading} size="sm">
                     {loading ? '로딩...' : '새로고침'}
                   </Button>
                   <Button 

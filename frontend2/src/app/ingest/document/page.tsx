@@ -7,10 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import FileUpload from '@/components/ui/FileUpload'
-import api from '@/lib/api'
-import { PresignRequest, SingleIngestRequest, Category } from '@/types/api'
+import { api } from '@/lib/api'
+import { SingleIngestRequest, Category } from '@/types/api'
 import { mockApi } from '@/lib/mock-api'
-import { isApiImplemented } from '@/lib/api-status'
 
 // 가변 계층 카테고리 표시를 위한 유틸리티 함수
 const formatCategoryHierarchy = (category: Category | undefined): string => {
@@ -115,45 +114,29 @@ export default function DocumentIngestPage() {
 
   const uploadFile = async (file: File): Promise<string> => {
     try {
-      if (isApiImplemented('/files/presign')) {
-        // 1. Presigned URL 요청
-        const presignRequest: PresignRequest = {
-          fileName: file.name,
-          contentType: file.type,
-          size: file.size
+      // 직접 파일 업로드 방식 사용 (presign 방식 대신)
+      console.log('Uploading file directly to /files/upload:', file.name)
+      
+      const uploadFormData = new FormData()
+      uploadFormData.append('file', file)
+
+      const uploadResponse = await api.post('/files/upload', uploadFormData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            setUploadProgress(prev => ({ ...prev, [file.name]: percentCompleted }))
+          }
         }
+      })
 
-        const presignResponse = await api.post('/files/presign', presignRequest)
-        const { fileId, uploadUrl } = presignResponse.data
+      const uploadResult = uploadResponse.data
+      const fileId = uploadResult.fileId
 
-        // 2. 파일 업로드
-        const uploadResponse = await fetch(uploadUrl, {
-          method: 'PUT',
-          body: file,
-          headers: {
-            'Content-Type': file.type,
-          },
-        })
-
-        if (!uploadResponse.ok) {
-          throw new Error('파일 업로드에 실패했습니다.')
-        }
-
-        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }))
-        return fileId
-      } else {
-        // Mock API 사용
-        console.warn('Using mock API for file upload - backend not implemented yet')
-        
-        const mockPresignResponse = await mockApi.getPresignedUrl(file.name)
-        const { fileId, uploadUrl } = mockPresignResponse
-
-        // Mock 업로드 시뮬레이션
-        await mockApi.uploadFile(uploadUrl, file)
-
-        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }))
-        return fileId
-      }
+      setUploadProgress(prev => ({ ...prev, [file.name]: 100 }))
+      return fileId
 
     } catch (error) {
       console.error('File upload error:', error)
