@@ -82,4 +82,3 @@ public class HybridCategorySearchService {
         public void setHybridScore(double hybridScore) { this.hybridScore = hybridScore; }
     }
 }
-

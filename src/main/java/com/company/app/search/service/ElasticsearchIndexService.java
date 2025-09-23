@@ -703,7 +703,7 @@ public class ElasticsearchIndexService {
     }
     
     /**
-     * 벡터 검색 수행 (임계값 0.25 적용)
+     * 벡터 검색 수행 (임계값 0.20 적용)
      */
     private List<ChunkSearchHit> performVectorSearch(String query, int size) {
         try {
