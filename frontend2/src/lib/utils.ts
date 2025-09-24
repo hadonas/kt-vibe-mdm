@@ -22,3 +22,30 @@ export function formatFileSize(bytes: number) {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
+
+export function formatCategory(category: any): string {
+  if (!category) return '분류 없음'
+
+  // displayPath 우선
+  if (category.displayPath) return category.displayPath
+
+  // hierarchy 사용
+  if (Array.isArray(category.hierarchy) && category.hierarchy.length > 0) {
+    return category.hierarchy
+      .sort((a: any, b: any) => a.level - b.level)
+      .map((l: any) => l.name)
+      .join(' > ')
+  }
+
+  // names 배열 사용
+  if (Array.isArray(category.names) && category.names.length > 0) {
+    return category.names.join(' > ')
+  }
+
+  // 레거시 3단계 필드 사용
+  const parts: string[] = []
+  if (category.majorName) parts.push(category.majorName)
+  if (category.midName && category.midName !== category.majorName) parts.push(category.midName)
+  if (category.subName && category.subName !== category.midName) parts.push(category.subName)
+  return parts.length ? parts.join(' > ') : '분류 없음'
+}

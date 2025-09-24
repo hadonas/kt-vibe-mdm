@@ -3,12 +3,14 @@ package com.company.app.common.dto;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.List;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Category {
     // 기존 3단계 호환성을 위한 필드들
     private String majorCode;
@@ -72,9 +74,13 @@ public class Category {
      */
     public List<String> getCodes() {
         if (hierarchy != null && !hierarchy.isEmpty()) {
-            return hierarchy.stream().map(CategoryLevel::getCode).toList();
+            java.util.List<String> list = new java.util.ArrayList<>();
+            for (CategoryLevel level : hierarchy) {
+                list.add(level.getCode());
+            }
+            return list;
         }
-        return List.of(majorCode, midCode, subCode);
+        return new java.util.ArrayList<>(java.util.Arrays.asList(majorCode, midCode, subCode));
     }
 
     /**
@@ -82,9 +88,13 @@ public class Category {
      */
     public List<String> getNames() {
         if (hierarchy != null && !hierarchy.isEmpty()) {
-            return hierarchy.stream().map(CategoryLevel::getName).toList();
+            java.util.List<String> list = new java.util.ArrayList<>();
+            for (CategoryLevel level : hierarchy) {
+                list.add(level.getName());
+            }
+            return list;
         }
-        return List.of(majorName, midName, subName);
+        return new java.util.ArrayList<>(java.util.Arrays.asList(majorName, midName, subName));
     }
 
     /** Depth of the category (hierarchy size or 3 if legacy). */

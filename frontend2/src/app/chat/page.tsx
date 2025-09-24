@@ -30,6 +30,7 @@ interface ChatMessage {
     snippet: string
     filename?: string
     score: number
+  categoryPath?: string // optional hierarchical category path from backend
   }>
   timestamp: Date
 }
@@ -321,6 +322,11 @@ export default function ChatPage() {
                             <p className="text-gray-600 line-clamp-2">
                               {source.snippet}
                             </p>
+                            {source.categoryPath && (
+                              <div className="text-[10px] text-gray-400 mt-1 truncate" title={source.categoryPath}>
+                                {source.categoryPath}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
