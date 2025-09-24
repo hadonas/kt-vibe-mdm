@@ -228,22 +228,25 @@ public class LocalFileStorageService {
      */
     private List<String> buildCategoryHierarchyPath(Category category) {
         List<String> pathComponents = new ArrayList<>();
-        
-        // 카테고리의 fullCode를 파싱하여 계층 구조 파악
+        // Prefer hierarchy helper methods
+        if (category.getHierarchy() != null && !category.getHierarchy().isEmpty()) {
+            category.getHierarchy().forEach(level -> {
+                String dirName = String.format("%s_%s", level.getCode(), sanitizeFileName(level.getName()));
+                pathComponents.add(dirName);
+            });
+            return pathComponents;
+        }
+        // Fallback to fullCode parsing if present
         String fullCode = category.getFullCode();
         if (fullCode != null && fullCode.contains("-")) {
             String[] codes = fullCode.split("-");
-            
-            // 각 레벨의 카테고리 정보를 조회하여 경로 구성
             for (String code : codes) {
                 try {
                     CatalogNode node = catalogNodeRepository.findByCode(code).orElse(null);
                     if (node != null) {
-                        String dirName = String.format("%s_%s", 
-                            code, sanitizeFileName(node.getName()));
+                        String dirName = String.format("%s_%s", code, sanitizeFileName(node.getName()));
                         pathComponents.add(dirName);
                     } else {
-                        // 카테고리 정보를 찾을 수 없으면 코드만 사용
                         pathComponents.add(code);
                     }
                 } catch (Exception e) {
@@ -251,16 +254,12 @@ public class LocalFileStorageService {
                     pathComponents.add(code);
                 }
             }
-        } else {
-            // fullCode가 없거나 형식이 다르면 기존 방식 사용
-            pathComponents.add(String.format("%s_%s", 
-                category.getMajorCode(), sanitizeFileName(category.getMajorName())));
-            pathComponents.add(String.format("%s_%s", 
-                category.getMidCode(), sanitizeFileName(category.getMidName())));
-            pathComponents.add(String.format("%s_%s", 
-                category.getSubCode(), sanitizeFileName(category.getSubName())));
+            return pathComponents;
         }
-        
+        // Legacy fallback
+        pathComponents.add(String.format("%s_%s", category.getMajorCode(), sanitizeFileName(category.getMajorName())));
+        pathComponents.add(String.format("%s_%s", category.getMidCode(), sanitizeFileName(category.getMidName())));
+        pathComponents.add(String.format("%s_%s", category.getSubCode(), sanitizeFileName(category.getSubName())));
         return pathComponents;
     }
     
@@ -355,9 +354,7 @@ public class LocalFileStorageService {
         content.append("## 문서 정보\n");
         content.append("- **코드번호**: ").append(document.getSerial().getFull()).append("\n");
         content.append("- **제목**: ").append(document.getPurpose()).append("\n");
-        content.append("- **분류**: ").append(document.getCategory().getMajorName())
-                .append(" > ").append(document.getCategory().getMidName())
-                .append(" > ").append(document.getCategory().getSubName()).append("\n");
+        content.append("- **분류**: ").append(document.getCategory().getDisplayPath()).append("\n");
         content.append("- **등록일**: ").append(document.getCreatedAt()).append("\n");
         content.append("- **승인일**: ").append(document.getApprovedAt() != null ? document.getApprovedAt() : "미승인").append("\n");
         content.append("- **등록자**: ").append(document.getOwnerId()).append("\n\n");
@@ -399,9 +396,7 @@ public class LocalFileStorageService {
         content.append("## 문서 정보\n");
         content.append("- **코드번호**: ").append(document.getSerial().getFull()).append("\n");
         content.append("- **제목**: ").append(document.getPurpose()).append("\n");
-        content.append("- **분류**: ").append(document.getCategory().getMajorName())
-                .append(" > ").append(document.getCategory().getMidName())
-                .append(" > ").append(document.getCategory().getSubName()).append("\n");
+        content.append("- **분류**: ").append(document.getCategory().getDisplayPath()).append("\n");
         content.append("- **등록일**: ").append(document.getCreatedAt()).append("\n");
         content.append("- **승인일**: ").append(document.getApprovedAt() != null ? document.getApprovedAt() : "미승인").append("\n");
         content.append("- **등록자**: ").append(document.getOwnerId()).append("\n\n");

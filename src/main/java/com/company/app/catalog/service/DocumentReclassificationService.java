@@ -8,6 +8,7 @@ import com.company.app.document.repository.DocumentRepository;
 import com.company.app.file.service.LocalFileStorageService;
 import com.company.app.ingest.service.RepositoryAnalysisService;
 import com.company.app.search.service.ElasticsearchIndexService;
+import com.company.app.common.service.SerialNumberService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -38,6 +39,7 @@ public class DocumentReclassificationService {
     private final CatalogNodeRepository catalogNodeRepository;
     private final RepositoryAnalysisService repositoryAnalysisService;
     private final ElasticsearchIndexService elasticsearchIndexService;
+    private final SerialNumberService serialNumberService;
     
     /**
      * 모든 문서를 스마트 분류로 재분류
@@ -231,59 +233,18 @@ public class DocumentReclassificationService {
      */
     private Serial generateNewSerial(Category newCategory) {
         try {
-            // 새 카테고리의 서브코드 추출
-            String subCode;
-            if (newCategory.getFullCode() != null) {
-                // 가변 계층 구조: 마지막 레벨 코드를 서브코드로 사용
-                String[] codes = newCategory.getFullCode().split("-");
-                subCode = codes[codes.length - 1];
-            } else {
-                // 기존 3레벨 구조
-                subCode = newCategory.getSubCode();
+            String leafCode = newCategory.getLeafCode();
+            if (leafCode == null) {
+                leafCode = "UNCAT";
             }
-            
-            // 해당 서브코드의 다음 번호 조회
-            int nextNumber = getNextSerialNumber(subCode);
-            
-            return Serial.of(subCode, nextNumber);
-            
+            return serialNumberService.generateNextSerial(leafCode);
         } catch (Exception e) {
             log.error("새 일련번호 생성 실패: {}", newCategory.getFullCode(), e);
-            // Fallback: 현재 시간 기반 번호
-            int fallbackNumber = (int) (System.currentTimeMillis() % 10000);
-            String subCode = newCategory.getSubCode() != null ? newCategory.getSubCode() : "A01";
-            return Serial.of(subCode, fallbackNumber);
+            return serialNumberService.generateNextSerial("UNCAT");
         }
     }
     
-    /**
-     * 서브코드별 다음 일련번호 조회
-     */
-    private int getNextSerialNumber(String subCode) {
-        try {
-            // 해당 서브코드로 시작하는 마지막 일련번호 조회
-            List<DocumentEntity> documents = documentRepository.findAll();
-            int maxNumber = documents.stream()
-                .filter(doc -> doc.getSerial() != null && doc.getSerial().getFull() != null)
-                .filter(doc -> doc.getSerial().getFull().startsWith(subCode + "-"))
-                .mapToInt(doc -> {
-                    try {
-                        String[] parts = doc.getSerial().getFull().split("-");
-                        return Integer.parseInt(parts[1]);
-                    } catch (Exception e) {
-                        return 0;
-                    }
-                })
-                .max()
-                .orElse(0);
-            
-            return maxNumber + 1;
-            
-        } catch (Exception e) {
-            log.warn("일련번호 조회 실패, 랜덤 번호 사용: {}", subCode, e);
-            return (int) (Math.random() * 9000) + 1000; // 1000-9999 범위
-        }
-    }
+
 
     /**
      * 문서 파일을 새로운 카테고리 경로로 이동 및 일련번호 변경
@@ -392,16 +353,11 @@ public class DocumentReclassificationService {
         if (cat1 == null || cat2 == null) {
             return cat1 == cat2;
         }
-        
-        // fullCode 비교 (가장 정확한 방법)
         if (cat1.getFullCode() != null && cat2.getFullCode() != null) {
             return cat1.getFullCode().equals(cat2.getFullCode());
         }
-        
-        // 기존 방식 비교 (Fallback)
-        return cat1.getMajorCode().equals(cat2.getMajorCode()) &&
-               cat1.getMidCode().equals(cat2.getMidCode()) &&
-               cat1.getSubCode().equals(cat2.getSubCode());
+        // Fallback compare by leaf if fullCode missing (legacy support)
+        return cat1.getLeafCode().equals(cat2.getLeafCode());
     }
     
     /**
