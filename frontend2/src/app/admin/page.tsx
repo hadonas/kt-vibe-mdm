@@ -42,6 +42,8 @@ interface CatalogNode {
   } | null;
   lastVectorUpdate: string | null;
   children: CatalogNode[] | null;
+  // Optional extended smart fields (future-proofing; may be provided by backend later)
+  displayPath?: string | null;
 }
 
 interface CategoryCreateRequest {
@@ -243,6 +245,20 @@ export default function AdminPage() {
 
   const renderCategoryTree = (parentCode: string | null = null, level: number = 1) => {
     const childCategories = categories.filter(cat => cat.parentCode === parentCode && cat.level === level);
+    const map: Record<string, CatalogNode> = Object.fromEntries(categories.map(c => [c.code, c]));
+    const buildPath = (cat: CatalogNode): string => {
+      if (cat.displayPath) return cat.displayPath; // backend supplied full path
+      const parts: string[] = [];
+      let cur: CatalogNode | undefined = cat;
+      const guard = new Set<string>();
+      while (cur) {
+        if (guard.has(cur.code)) break; // cycle safety
+        guard.add(cur.code);
+        parts.push(cur.name);
+        cur = cur.parentCode ? map[cur.parentCode] : undefined;
+      }
+      return parts.reverse().join(' > ');
+    };
     
     return childCategories.map(category => {
       const hasChildren = categories.some(cat => cat.parentCode === category.code);
@@ -287,7 +303,7 @@ export default function AdminPage() {
                   <DocumentIcon className="w-5 h-5 text-gray-500 mr-2" />
                 )}
                 
-                <div className="flex-1">
+                <div className="flex-1" title={buildPath(category)}>
                   <div className="font-medium text-gray-900 flex items-center justify-between">
                     <span>{category.name} ({category.code})</span>
                     <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-full ml-2">
@@ -299,6 +315,9 @@ export default function AdminPage() {
                       {category.description}
                     </div>
                   )}
+                  <div className="text-xs text-gray-400 truncate max-w-[240px]">
+                    {buildPath(category)}
+                  </div>
                 </div>
               </div>
             </div>
@@ -541,6 +560,26 @@ export default function AdminPage() {
                       <div>상위: {selectedCategory.parentCode || '없음'}</div>
                       <div>순서: {selectedCategory.order}</div>
                       <div>활성: {selectedCategory.active ? '예' : '아니오'}</div>
+                      {/* Full hierarchical path */}
+                      <div className="pt-1 border-t mt-2 text-gray-500">
+                        전체 경로: {(function(){
+                          const map: Record<string, CatalogNode> = Object.fromEntries(categories.map(c => [c.code, c]));
+                          const build = (cat: CatalogNode): string => {
+                            if (cat.displayPath) return cat.displayPath;
+                            const chain: string[] = [];
+                            let cur: CatalogNode | undefined = cat;
+                            const guard = new Set<string>();
+                            while (cur) {
+                              if (guard.has(cur.code)) break;
+                              guard.add(cur.code);
+                              chain.push(cur.name);
+                              cur = cur.parentCode ? map[cur.parentCode] : undefined;
+                            }
+                            return chain.reverse().join(' > ');
+                          };
+                          return build(selectedCategory);
+                        })()}
+                      </div>
                     </div>
                   </div>
                   
@@ -713,8 +752,9 @@ export default function AdminPage() {
                     const parentCode = e.target.value || null;
                     const newLevel = calculateLevelFromParent(parentCode);
                     setCreateForm({
-                      ...createForm, 
-                      parentCode: parentCode,
+                      ...createForm,
+                      // ensure we don't store null where type expects string | undefined
+                      parentCode: parentCode || undefined,
                       level: newLevel
                     });
                   }}
