@@ -77,14 +77,8 @@ public class AdminController {
             Map<String, List<DocumentEntity>> documentsByCategory = allDocuments.stream()
                 .filter(doc -> doc.getCategory() != null)
                 .collect(Collectors.groupingBy(doc -> {
-                    // fullCode 우선, 없으면 기존 3레벨 코드 사용
-                    if (doc.getCategory().getFullCode() != null) {
-                        return doc.getCategory().getFullCode();
-                    } else {
-                        return doc.getCategory().getMajorCode() + "-" + 
-                               doc.getCategory().getMidCode() + "-" + 
-                               doc.getCategory().getSubCode();
-                    }
+                    // Category의 getFullCode() method는 이미 fallback 로직 포함
+                    return doc.getCategory().getFullCode();
                 }));
             
             // 3. 계층 구조 데이터 생성
@@ -274,11 +268,8 @@ public class AdminController {
             return doc.getCategory().getFullCode().equals(categoryCode);
         }
         
-        // 기존 3레벨 구조 확인
-        String legacyCode = doc.getCategory().getMajorCode() + "-" + 
-                           doc.getCategory().getMidCode() + "-" + 
-                           doc.getCategory().getSubCode();
-        return legacyCode.equals(categoryCode);
+        // Category의 fullCode와 비교
+        return doc.getCategory().getFullCode().equals(categoryCode);
     }
     
 

@@ -13,6 +13,7 @@ import com.company.app.file.service.FileAnalysisService;
 import com.company.app.ingest.service.RepositoryAnalysisService;
 import com.company.app.ingest.service.ChunkIngestionService;
 import com.company.app.search.service.ElasticsearchIndexService;
+import com.company.app.common.service.SerialNumberService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -39,6 +40,7 @@ public class ApprovalService {
     private final RepositoryAnalysisService repositoryAnalysisService;
     private final ChunkIngestionService chunkIngestionService; // 청킹 서비스
     private final ElasticsearchIndexService elasticsearchIndexService; // ES 색인
+    private final SerialNumberService serialNumberService;
     
     public Page<IngestRequest> getApprovalRequests(int page, int size, String status) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "requestedAt"));
@@ -157,30 +159,6 @@ public class ApprovalService {
     }
     
     /**
-     * 문서를 로컬 파일 시스템에 저장 (기존 메서드 - 호환성을 위해 유지)
-     */
-    private String saveDocumentToLocalFileSystem(DocumentEntity document, IngestRequest request) {
-        try {
-            // 소스 타입에 따라 다른 저장 방식 사용
-            if (request.getSource().getType().equals("REPO") && request.getSource().getRepoUrl() != null) {
-                // GitHub 레포지토리인 경우: 분석 결과와 함께 저장
-                String analysisResult = generateRepositoryAnalysisResult(request);
-                return localFileStorageService.saveRepositoryAnalysis(
-                    document, 
-                    request.getSource().getRepoUrl(), 
-                    analysisResult
-                );
-            } else {
-                // 일반 파일인 경우: 파일 내용 그대로 저장
-                return localFileStorageService.saveDocument(document);
-            }
-        } catch (Exception e) {
-            log.error("로컬 파일 저장 중 오류 발생: {}", e.getMessage(), e);
-            throw new RuntimeException("로컬 파일 저장에 실패했습니다: " + e.getMessage(), e);
-        }
-    }
-    
-    /**
      * GitHub 레포지토리 분석 결과 생성
      */
     private String generateRepositoryAnalysisResult(IngestRequest request) {
@@ -209,44 +187,42 @@ public class ApprovalService {
     }
     
     private DocumentEntity createDocumentFromIngestRequest(IngestRequest request) {
-        // Serial 생성 (임시로 현재 시간 기반)
-        String subCode = request.getProposedCategory().getSubCode();
-        int number = (int) (System.currentTimeMillis() % 10000); // 임시 번호
-        Serial serial = Serial.of(subCode, number);
-        
-        // Category 생성
-        Category category = new Category(
-            request.getProposedCategory().getMajorCode(),
-            request.getProposedCategory().getMajorName(),
-            request.getProposedCategory().getMidCode(),
-            request.getProposedCategory().getMidName(),
-            request.getProposedCategory().getSubCode(),
-            request.getProposedCategory().getSubName()
-        );
-        
-        // Source 생성
+        Category proposed = request.getProposedCategory();
+        if (proposed == null) {
+            throw new IllegalStateException("Proposed category가 없습니다.");
+        }
+
+        // 동적 계층 지원: Category helper method 활용하여 정식 일련번호 생성
+        String leafCode = proposed.getLeafCode();
+        if (leafCode == null) {
+            leafCode = "UNCAT"; // 비정상 상태 fallback
+        }
+
+        // Serial 생성: SerialNumberService를 통한 순차적 일련번호
+        Serial serial = serialNumberService.generateNextSerial(leafCode);
+
+        // Category 객체는 그대로 사용 (dynamic hierarchy 포함)
+        Category category = proposed;
+
+        // Source 복제
         Source source = new Source(
             request.getSource().getType(),
             request.getSource().getRepoUrl(),
             request.getSource().getFiles()
         );
-        
-        // DocumentEntity 생성
+
         DocumentEntity document = new DocumentEntity();
         document.setOwnerId(request.getOwnerId());
         document.setSerial(serial);
         document.setCategory(category);
-        document.setPurpose(request.getProposedTitle() != null ? request.getProposedTitle() : 
-                           (request.getProposedPurpose() != null ? request.getProposedPurpose() : "제목 없음"));
-        
-        // DOCX/XLSX 파일의 경우 FileAnalysisService를 통해 내용 추출
+        document.setPurpose(request.getProposedTitle() != null ? request.getProposedTitle() :
+                (request.getProposedPurpose() != null ? request.getProposedPurpose() : "제목 없음"));
+
         String content = request.getExtractedText();
-        if (content == null && request.getSource().getType() == Source.SourceType.PLAN && 
-            request.getSource().getFiles() != null && !request.getSource().getFiles().isEmpty()) {
+        if (content == null && request.getSource().getType() == Source.SourceType.PLAN &&
+                request.getSource().getFiles() != null && !request.getSource().getFiles().isEmpty()) {
             try {
-                String fileId = request.getSource().getFiles().get(0);
-                // 임시 파일에서 내용 추출 (이미 FileAnalysisService에서 처리된 내용)
-                // 실제로는 IngestRequest에 extractedText가 저장되어야 함
+                // NOTE: 실제 추출 로직은 사전에 실행되어 request.extractedText에 들어가야 함
                 content = "DOCX 파일 내용이 추출되지 않았습니다. 파일 분석을 다시 수행해주세요.";
             } catch (Exception e) {
                 log.warn("파일 내용 추출 실패: {}", e.getMessage());
@@ -257,24 +233,17 @@ public class ApprovalService {
         document.setSource(source);
         document.setTags(request.getTags());
         document.setRequestedAt(request.getRequestedAt());
-        document.setApprovedAt(LocalDateTime.now()); // 승인 시점을 현재 시간으로 설정
+        document.setApprovedAt(LocalDateTime.now());
         document.setVersion(1);
-        
-        // 원본 파일명 설정 (파일 기반 등록인 경우)
+
         if (request.getSource().getType() == Source.SourceType.PLAN) {
-            // IngestRequest에 저장된 원본 파일명 사용
             if (request.getOriginalFileName() != null && !request.getOriginalFileName().isEmpty()) {
                 document.setOriginalFileName(request.getOriginalFileName());
             } else if (request.getSource().getFiles() != null && !request.getSource().getFiles().isEmpty()) {
-                // 원본 파일명이 없으면 첫 번째 파일 ID를 사용
-                String firstFileName = request.getSource().getFiles().get(0);
-                document.setOriginalFileName(firstFileName);
+                document.setOriginalFileName(request.getSource().getFiles().get(0));
             }
         }
-        
-        // 벡터 임베딩은 나중에 별도 서비스에서 처리
-        // document.setVectors(createVectorEmbeddings(request));
-        
+
         return document;
     }
     

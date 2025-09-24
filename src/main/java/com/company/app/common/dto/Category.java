@@ -65,6 +65,59 @@ public class Category {
     public String getFullName() {
         return fullName != null ? fullName : (majorName + " > " + midName + " > " + subName);
     }
+
+    // ----- Helper methods for hierarchy-first refactor (non-breaking) -----
+    /**
+     * Returns hierarchy codes in order. Falls back to legacy 3-level fields if hierarchy is null.
+     */
+    public List<String> getCodes() {
+        if (hierarchy != null && !hierarchy.isEmpty()) {
+            return hierarchy.stream().map(CategoryLevel::getCode).toList();
+        }
+        return List.of(majorCode, midCode, subCode);
+    }
+
+    /**
+     * Returns hierarchy names in order. Falls back to legacy 3-level fields if hierarchy is null.
+     */
+    public List<String> getNames() {
+        if (hierarchy != null && !hierarchy.isEmpty()) {
+            return hierarchy.stream().map(CategoryLevel::getName).toList();
+        }
+        return List.of(majorName, midName, subName);
+    }
+
+    /** Depth of the category (hierarchy size or 3 if legacy). */
+    public int getDepth() {
+        if (hierarchy != null && !hierarchy.isEmpty()) {
+            return hierarchy.size();
+        }
+        return 3;
+    }
+
+    /** Leaf code (last code in hierarchy or subCode). */
+    public String getLeafCode() {
+        if (hierarchy != null && !hierarchy.isEmpty()) {
+            return hierarchy.get(hierarchy.size() - 1).getCode();
+        }
+        return subCode;
+    }
+
+    /** Leaf name (last name in hierarchy or subName). */
+    public String getLeafName() {
+        if (hierarchy != null && !hierarchy.isEmpty()) {
+            return hierarchy.get(hierarchy.size() - 1).getName();
+        }
+        return subName;
+    }
+
+    /** Display path like "A > B > C" built dynamically. */
+    public String getDisplayPath() {
+        if (hierarchy != null && !hierarchy.isEmpty()) {
+            return String.join(" > ", getNames());
+        }
+        return getFullName();
+    }
     
     @Data
     @NoArgsConstructor

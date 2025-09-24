@@ -336,14 +336,8 @@ public class SmartClassificationService {
      * Category DTO에서 코드 추출
      */
     private String getCategoryCode(Category category) {
-        // 가장 구체적인 코드 반환 (소분류 > 중분류 > 대분류)
-        if (category.getSubCode() != null && !category.getSubCode().equals(category.getMidCode())) {
-            return category.getSubCode();
-        } else if (category.getMidCode() != null && !category.getMidCode().equals(category.getMajorCode())) {
-            return category.getMidCode();
-        } else {
-            return category.getMajorCode();
-        }
+        // 새로운 helper method 사용하여 leaf code 반환
+        return category.getLeafCode();
     }
     
     /**
