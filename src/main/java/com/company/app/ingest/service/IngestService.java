@@ -7,6 +7,7 @@ import com.company.app.ingest.repository.IngestRequestRepository;
 import com.company.app.file.service.LocalFileStorageService;
 import com.company.app.file.service.FileAnalysisService;
 import com.company.app.catalog.service.SmartClassificationService;
+import com.company.app.catalog.service.CategoryUsageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class IngestService {
     private final LocalFileStorageService localFileStorageService;
     private final FileAnalysisService fileAnalysisService;
     private final SmartClassificationService smartClassificationService;
+    private final CategoryUsageService categoryUsageService;
     
     public Map<String, Object> createRepoPreview(String repoUrl, String accessToken) {
         try {
@@ -134,6 +136,15 @@ public class IngestService {
         }
         
         IngestRequest saved = ingestRequestRepository.save(ingestRequest);
+        // 카테고리 사용량 증가 (제안된 카테고리가 존재하면)
+        try {
+            if (saved.getProposedCategory() != null) {
+                Category cat = saved.getProposedCategory();
+                categoryUsageService.incrementUsage(cat.getCodes(), cat.getLeafCode());
+            }
+        } catch (Exception e) {
+            log.warn("카테고리 사용량 증가 실패: {}", e.getMessage());
+        }
         
         Map<String, Object> response = new HashMap<>();
         response.put("id", saved.getId());
@@ -171,6 +182,15 @@ public class IngestService {
         }
         
         IngestRequest saved = ingestRequestRepository.save(ingestRequest);
+        // 카테고리 사용량 증가
+        try {
+            if (saved.getProposedCategory() != null) {
+                Category cat = saved.getProposedCategory();
+                categoryUsageService.incrementUsage(cat.getCodes(), cat.getLeafCode());
+            }
+        } catch (Exception e) {
+            log.warn("카테고리 사용량 증가 실패: {}", e.getMessage());
+        }
         
         // 임시 저장소에 분석 결과 저장
         try {

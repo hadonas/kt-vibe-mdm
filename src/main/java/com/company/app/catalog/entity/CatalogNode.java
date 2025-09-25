@@ -57,6 +57,10 @@ public class CatalogNode extends BaseEntity {
     private LocalDateTime lastVectorUpdate; // 벡터 마지막 업데이트 시간
     
     private List<CatalogNode> children; // 하위 카테고리들
+
+    // 문서 사용량 카운트 (전체/리프 기준)
+    private Integer documentCount = 0;      // 이 노드를 포함하거나 하위에 속한 문서 수 (롤업)
+    private Integer leafDocumentCount = 0;  // 이 노드가 문서의 실제 리프(직접 선택된)로 사용된 횟수
     
     public boolean isMajor() {
         return level == 1;

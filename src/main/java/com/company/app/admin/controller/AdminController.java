@@ -2,10 +2,8 @@ package com.company.app.admin.controller;
 
 import com.company.app.document.entity.DocumentEntity;
 import com.company.app.document.repository.DocumentRepository;
-import com.company.app.document.repository.DocumentChunkRepository;
-import com.company.app.catalog.repository.CatalogNodeRepository;
 import com.company.app.file.service.LocalFileStorageService;
-import com.company.app.search.service.ElasticsearchIndexService;
+import com.company.app.document.service.DocumentDeletionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -27,9 +25,8 @@ import java.util.Optional;
 public class AdminController {
     
     private final DocumentRepository documentRepository;
-    private final DocumentChunkRepository chunkRepository;
     private final LocalFileStorageService localFileStorageService;
-    private final ElasticsearchIndexService elasticsearchIndexService;
+    private final DocumentDeletionService documentDeletionService;
     
     /**
      * 모든 문서 목록 조회
@@ -329,78 +326,24 @@ public class AdminController {
     public ResponseEntity<Map<String, Object>> deleteDocumentsByCategory(@PathVariable String categoryCode) {
         try {
             log.info("카테고리별 문서 삭제 요청: {}", categoryCode);
-            
-            // 1. 해당 카테고리의 모든 문서 조회
             List<DocumentEntity> allDocuments = documentRepository.findAll();
             List<DocumentEntity> documentsToDelete = allDocuments.stream()
                 .filter(doc -> doc.getCategory() != null && matchesCategory(doc, categoryCode))
                 .collect(Collectors.toList());
-            
             if (documentsToDelete.isEmpty()) {
-                log.warn("삭제할 문서를 찾을 수 없음: {}", categoryCode);
                 return ResponseEntity.notFound().build();
             }
-            
-            int deletedCount = 0;
-            int fileDeletedCount = 0;
-            
-            for (DocumentEntity document : documentsToDelete) {
-                try {
-                    
-                    // 1. Elasticsearch 청크 삭제 (MongoDB 삭제 전에 실행)
-                    try {
-                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
-                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
-                    }
-                    
-                    // 2. MongoDB 청크 삭제
-                    try {
-                        chunkRepository.deleteByDocumentId(document.getId());
-                        log.info("MongoDB에서 청크 삭제: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("MongoDB 청크 삭제 실패: {}", document.getId(), e);
-                    }
-                    
-                    // 3. Elasticsearch 인덱스에서 문서 제거
-                    try {
-                        elasticsearchIndexService.deleteDocumentFromIndex(document.getId());
-                        log.info("Elasticsearch 인덱스에서 문서 제거: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("Elasticsearch 문서 삭제 실패: {}", document.getId(), e);
-                        // Elasticsearch 실패는 전체 실패로 처리하지 않음
-                    }
-                    
-                    // 4. MongoDB에서 문서 삭제
-                    documentRepository.delete(document);
-                    deletedCount++;
-                    log.info("MongoDB에서 문서 삭제: {}", document.getId());
-                    
-                    // 5. 파일시스템에서 파일 삭제
-                    if (localFileStorageService.deleteDocumentFile(document)) {
-                        fileDeletedCount++;
-                        log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial() != null ? document.getSerial().getFull() : document.getId());
-                    } else {
-                        log.warn("파일시스템에서 파일 삭제 실패: {}", document.getSerial() != null ? document.getSerial().getFull() : document.getId());
-                    }
-                    
-                } catch (Exception e) {
-                    log.error("문서 삭제 중 오류 발생 (문서 ID: {}): {}", document.getId(), e.getMessage(), e);
-                }
-            }
-            
-            Map<String, Object> result = new HashMap<>();
-            result.put("categoryCode", categoryCode);
-            result.put("deletedDocuments", deletedCount);
-            result.put("deletedFiles", fileDeletedCount);
-            result.put("message", String.format("카테고리 %s의 %d개 문서와 %d개 파일이 삭제되었습니다.", categoryCode, deletedCount, fileDeletedCount));
-            
-            log.info("카테고리별 문서 삭제 완료: {} (문서: {}개, 파일: {}개)", categoryCode, deletedCount, fileDeletedCount);
-            return ResponseEntity.ok(result);
-            
+            var results = documentDeletionService.deleteDocuments(documentsToDelete);
+            long deletedDocs = results.stream().filter(r -> r.mongoDoc()).count();
+            long deletedFiles = results.stream().filter(r -> r.fileDeleted()).count();
+            Map<String,Object> body = new HashMap<>();
+            body.put("categoryCode", categoryCode);
+            body.put("deletedDocuments", deletedDocs);
+            body.put("deletedFiles", deletedFiles);
+            body.put("results", results);
+            return ResponseEntity.ok(body);
         } catch (Exception e) {
-            log.error("카테고리별 문서 삭제 중 오류 발생: {}", e.getMessage(), e);
+            log.error("카테고리별 문서 삭제 중 오류", e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -413,93 +356,25 @@ public class AdminController {
     public ResponseEntity<Map<String, Object>> deleteDocumentByCode(@PathVariable String code) {
         try {
             log.info("코드로 문서 삭제 요청: {}", code);
-            
-            // 1. MongoDB에서 해당 코드의 문서들 조회
             Optional<DocumentEntity> documentOpt = documentRepository.findBySerialFull(code);
-            
             if (documentOpt.isEmpty()) {
-                log.warn("MongoDB에서 문서를 찾을 수 없음, 파일시스템에서만 삭제 시도: {}", code);
-                
-                // Fallback: 파일시스템에서만 삭제 시도
                 boolean fileDeleted = localFileStorageService.deleteFileByCode(code);
-                
                 if (fileDeleted) {
-                    Map<String, Object> result = new HashMap<>();
-                    result.put("code", code);
-                    result.put("deletedDocuments", 0);
-                    result.put("deletedFiles", 1);
-                    result.put("message", String.format("코드 %s의 파일이 파일시스템에서 삭제되었습니다. (MongoDB에 문서가 없었음)", code));
-                    
-                    log.info("파일시스템에서만 파일 삭제 완료: {}", code);
-                    return ResponseEntity.ok(result);
-                } else {
-                    log.warn("파일시스템에서도 삭제할 파일을 찾을 수 없음: {}", code);
-                    return ResponseEntity.notFound().build();
+                    return ResponseEntity.ok(Map.of(
+                        "code", code,
+                        "deletedDocuments", 0,
+                        "deletedFiles", 1,
+                        "message", "MongoDB 문서 없이 파일만 삭제"));
                 }
+                return ResponseEntity.notFound().build();
             }
-            
-            List<DocumentEntity> documents = List.of(documentOpt.get());
-            
-            int deletedCount = 0;
-            int fileDeletedCount = 0;
-            
-            for (DocumentEntity document : documents) {
-                try {
-                    
-                    // 1. Elasticsearch 청크 삭제 (MongoDB 삭제 전에 실행)
-                    try {
-                        elasticsearchIndexService.deleteChunksByDocumentId(document.getId());
-                        log.info("Elasticsearch에서 청크 삭제: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("Elasticsearch 청크 삭제 실패: {}", document.getId(), e);
-                    }
-                    
-                    // 2. MongoDB 청크 삭제
-                    try {
-                        chunkRepository.deleteByDocumentId(document.getId());
-                        log.info("MongoDB에서 청크 삭제: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("MongoDB 청크 삭제 실패: {}", document.getId(), e);
-                    }
-                    
-                    // 3. Elasticsearch 인덱스에서 문서 제거
-                    try {
-                        elasticsearchIndexService.deleteDocumentFromIndex(document.getId());
-                        log.info("Elasticsearch 인덱스에서 문서 제거: {}", document.getId());
-                    } catch (Exception e) {
-                        log.warn("Elasticsearch 문서 삭제 실패: {}", document.getId(), e);
-                        // Elasticsearch 실패는 전체 실패로 처리하지 않음
-                    }
-                    
-                    // 4. MongoDB에서 문서 삭제
-                    documentRepository.delete(document);
-                    deletedCount++;
-                    log.info("MongoDB에서 문서 삭제: {}", document.getId());
-                    
-                    // 5. 파일시스템에서 파일 삭제
-                    if (localFileStorageService.deleteDocumentFile(document)) {
-                        fileDeletedCount++;
-                        log.info("파일시스템에서 파일 삭제 성공: {}", document.getSerial().getFull());
-                    } else {
-                        log.warn("파일시스템에서 파일 삭제 실패: {}", document.getSerial().getFull());
-                    }
-                    
-                } catch (Exception e) {
-                    log.error("문서 삭제 중 오류 발생 (문서 ID: {}): {}", document.getId(), e.getMessage(), e);
-                }
-            }
-            
-            Map<String, Object> result = new HashMap<>();
-            result.put("code", code);
-            result.put("deletedDocuments", deletedCount);
-            result.put("deletedFiles", fileDeletedCount);
-            result.put("message", String.format("코드 %s의 %d개 문서와 %d개 파일이 삭제되었습니다.", code, deletedCount, fileDeletedCount));
-            
-            log.info("코드로 문서 삭제 완료: {} (문서: {}개, 파일: {}개)", code, deletedCount, fileDeletedCount);
-            return ResponseEntity.ok(result);
-            
+            var result = documentDeletionService.deleteDocument(documentOpt.get());
+            Map<String,Object> body = new HashMap<>();
+            body.put("code", code);
+            body.put("result", result);
+            return ResponseEntity.ok(body);
         } catch (Exception e) {
-            log.error("코드로 문서 삭제 중 오류 발생: {}", e.getMessage(), e);
+            log.error("코드로 문서 삭제 중 오류", e);
             return ResponseEntity.internalServerError().build();
         }
     }
