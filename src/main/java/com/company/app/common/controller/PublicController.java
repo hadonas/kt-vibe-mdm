@@ -72,7 +72,7 @@ public class PublicController {
             }
             
             DocumentEntity document = documentOpt.get();
-            String filePath = localFileStorageService.getDocumentFilePath(document);
+            String filePath = localFileStorageService.getExistingDocumentFilePath(document);
             
             if (filePath == null || filePath.isEmpty()) {
                 log.warn("문서의 파일 경로가 없음: {}", code);

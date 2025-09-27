@@ -22,6 +22,23 @@ server:
   servlet:
     context-path: /api
 
+# Management/Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: always
+  health:
+    elasticsearch:
+      enabled: false  # Elasticsearch health check 비활성화
+    defaults:
+      enabled: true
+
 # JWT Configuration
 jwt:
   secret: ${JWT_SECRET:mySecretKey}
@@ -36,6 +53,14 @@ app:
     temp:
       path: ${FILE_TEMP_PATH:/app/temp}
 
+# Elasticsearch Configuration
+elasticsearch:
+  host: ${ELASTICSEARCH_HOST:elasticsearch}
+  port: ${ELASTICSEARCH_PORT:9200}
+  scheme: ${ELASTICSEARCH_SCHEME:http}
+  connect-timeout: ${ELASTICSEARCH_CONNECT_TIMEOUT:5000}
+  socket-timeout: ${ELASTICSEARCH_SOCKET_TIMEOUT:30000}
+
 # MongoDB Vector Search
 atlas:
   vector:
@@ -47,6 +72,14 @@ similarity:
   threshold: ${SIM_THRESHOLD:0.82}
   topk:
     default: ${TOPK_DEFAULT:5}
+
+# Vector Sharding
+vector:
+  shard:
+    count: ${VECTOR_SHARD_COUNT:4}
+  search:
+    fanout: ${VECTOR_SEARCH_FANOUT:1}
+    min-sufficient-ratio: ${VECTOR_SEARCH_MIN_SUFFICIENT_RATIO:0.5}
 
 # File Processing
 file:
@@ -69,6 +102,13 @@ llm:
     key: ${AI_API_KEY:sk-test-key}
     base: ${LLM_API_BASE:https://api.openai.com/v1}
   model: ${LLM_MODEL:gpt-5-mini}
+
+# Smart Classification Configuration
+classification:
+  candidate-count: ${CLASSIFICATION_CANDIDATE_COUNT:5}
+  confidence-threshold: ${CLASSIFICATION_CONFIDENCE_THRESHOLD:0.8}
+  bm25-weight: ${CLASSIFICATION_BM25_WEIGHT:0.3}
+  vector-weight: ${CLASSIFICATION_VECTOR_WEIGHT:0.7}
 
 # OpenAPI Documentation
 springdoc:
@@ -99,3 +139,7 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
     file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+  semantic-chunk:
+    enabled: ${SEMANTIC_CHUNK_ENABLED:true}
+    migrate-on-start: ${SEMANTIC_CHUNK_MIGRATE_ON_START:false}

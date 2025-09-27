@@ -1,16 +1,19 @@
 'use client'
 
 import { redirect } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import FileUpload from '@/components/ui/FileUpload'
-import api from '@/lib/api'
-import { PresignRequest, SingleIngestRequest, Category } from '@/types/api'
+import { api, categoryApi } from '@/lib/api'
+import { SingleIngestRequest, Category } from '@/types/api'
 import { mockApi } from '@/lib/mock-api'
-import { isApiImplemented } from '@/lib/api-status'
+import { formatCategory } from '@/lib/utils'
+
+// 가변 계층 카테고리 표시를 위한 유틸리티 함수
+// (이전 inline 함수 제거하고 utils의 formatCategory 사용)
 
 export default function DocumentIngestPage() {
   const [files, setFiles] = useState<File[]>([])
@@ -27,7 +30,77 @@ export default function DocumentIngestPage() {
     proposedTitle?: string
   } | null>(null)
   const [uploadedFileId, setUploadedFileId] = useState<string | null>(null)
+  // 전체 카테고리 (관리자 페이지와 동일한 구조를 재사용)
+  interface FlatCatalogNode {
+    code: string
+    name: string
+    level: number
+    parentCode: string | null
+  }
+  const [allCategories, setAllCategories] = useState<FlatCatalogNode[]>([])
+  const [categoryPathCodes, setCategoryPathCodes] = useState<string[]>([]) // 선택된 경로 코드들 (root->leaf)
+  const [categoryLoading, setCategoryLoading] = useState(false)
+  const [categoryError, setCategoryError] = useState<string | null>(null)
   const router = useRouter()
+
+  // 카테고리 로딩
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setCategoryLoading(true)
+        const res = await categoryApi.getCategories()
+        const cats = (res.data.categories || []).map((c: any) => ({
+          code: c.code,
+            name: c.name,
+            level: c.level,
+            parentCode: c.parentCode || null
+        }))
+        setAllCategories(cats)
+      } catch (e:any) {
+        setCategoryError(e.message || '카테고리를 불러오지 못했습니다.')
+      } finally {
+        setCategoryLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  // 분석 결과가 있고 경로 미선택 시 자동 채움
+  useEffect(() => {
+    if (analysisResult?.proposedCategory && categoryPathCodes.length === 0) {
+      const cat = analysisResult.proposedCategory
+      const codes = cat.codes || cat.hierarchy?.map(h => h.code) || [cat.subCode, cat.midCode, cat.majorCode].filter(Boolean).reverse()
+      if (codes && codes.length) setCategoryPathCodes(codes)
+    }
+  }, [analysisResult, categoryPathCodes.length])
+
+  // 선택된 경로 기반 Category 객체 구성
+  const selectedCategoryObject: Category | undefined = useMemo(() => {
+    if (categoryPathCodes.length === 0) return undefined
+    const nodes = categoryPathCodes.map(code => allCategories.find(c => c.code === code)).filter(Boolean) as FlatCatalogNode[]
+    if (nodes.length === 0) return undefined
+    const codes = nodes.map(n => n.code)
+    const names = nodes.map(n => n.name)
+    const depth = nodes.length
+    const leaf = nodes[nodes.length - 1]
+    // Backend expects legacy 3-level fields still present; map first three nodes accordingly
+    const major = nodes[0]
+    const mid = nodes[1]
+    const sub = nodes[2] || nodes[nodes.length - 1] // fallback to leaf if fewer than 3
+    return {
+      majorCode: major?.code || '',
+      majorName: major?.name || '',
+      midCode: mid?.code || '',
+      midName: mid?.name || '',
+      subCode: sub?.code || '',
+      subName: sub?.name || '',
+      codes, names, depth, leafCode: leaf.code, leafName: leaf.name,
+      hierarchy: nodes.map((n, idx) => ({ level: idx + 1, code: n.code, name: n.name })),
+      fullCode: codes.join('-'),
+      fullName: names.join(' > '),
+      displayPath: names.join(' > ')
+    }
+  }, [categoryPathCodes, allCategories])
 
   const analyzeFile = async (file: File) => {
     try {
@@ -94,45 +167,29 @@ export default function DocumentIngestPage() {
 
   const uploadFile = async (file: File): Promise<string> => {
     try {
-      if (isApiImplemented('/files/presign')) {
-        // 1. Presigned URL 요청
-        const presignRequest: PresignRequest = {
-          fileName: file.name,
-          contentType: file.type,
-          size: file.size
+      // 직접 파일 업로드 방식 사용 (presign 방식 대신)
+      console.log('Uploading file directly to /files/upload:', file.name)
+      
+      const uploadFormData = new FormData()
+      uploadFormData.append('file', file)
+
+      const uploadResponse = await api.post('/files/upload', uploadFormData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            setUploadProgress(prev => ({ ...prev, [file.name]: percentCompleted }))
+          }
         }
+      })
 
-        const presignResponse = await api.post('/files/presign', presignRequest)
-        const { fileId, uploadUrl } = presignResponse.data
+      const uploadResult = uploadResponse.data
+      const fileId = uploadResult.fileId
 
-        // 2. 파일 업로드
-        const uploadResponse = await fetch(uploadUrl, {
-          method: 'PUT',
-          body: file,
-          headers: {
-            'Content-Type': file.type,
-          },
-        })
-
-        if (!uploadResponse.ok) {
-          throw new Error('파일 업로드에 실패했습니다.')
-        }
-
-        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }))
-        return fileId
-      } else {
-        // Mock API 사용
-        console.warn('Using mock API for file upload - backend not implemented yet')
-        
-        const mockPresignResponse = await mockApi.getPresignedUrl(file.name)
-        const { fileId, uploadUrl } = mockPresignResponse
-
-        // Mock 업로드 시뮬레이션
-        await mockApi.uploadFile(uploadUrl, file)
-
-        setUploadProgress(prev => ({ ...prev, [file.name]: 100 }))
-        return fileId
-      }
+      setUploadProgress(prev => ({ ...prev, [file.name]: 100 }))
+      return fileId
 
     } catch (error) {
       console.error('File upload error:', error)
@@ -176,7 +233,7 @@ export default function DocumentIngestPage() {
         fileIds: uploadedFileId ? [uploadedFileId] : fileIds,
         purpose: purpose.trim() || undefined,
         tags: tags.trim() ? tags.split(',').map(tag => tag.trim()) : undefined,
-        proposedCategory: analysisResult?.proposedCategory,
+        proposedCategory: selectedCategoryObject || analysisResult?.proposedCategory,
         proposedTitle: analysisResult?.proposedTitle,
         originalFileName: files.length > 0 ? files[0].name : undefined
       }
@@ -210,6 +267,44 @@ export default function DocumentIngestPage() {
     if (newFiles.length > 0) {
       await analyzeFile(newFiles[0])
     }
+  }
+
+  const renderCategory = () => {
+    if (selectedCategoryObject) return formatCategory(selectedCategoryObject)
+    if (analysisResult?.proposedCategory) return formatCategory(analysisResult.proposedCategory)
+    return '분류 없음'
+  }
+
+  // 레벨별 선택 가능한 옵션 계산
+  const levelOptions = useMemo(() => {
+    const byParent: Record<string, FlatCatalogNode[]> = {}
+    allCategories.forEach(c => {
+      const key = c.parentCode || '__root__'
+      if (!byParent[key]) byParent[key] = []
+      byParent[key].push(c)
+    })
+    // 순서 보장
+    Object.values(byParent).forEach(arr => arr.sort((a,b) => a.code.localeCompare(b.code)))
+
+    const levels: FlatCatalogNode[][] = []
+    // level 1
+    levels.push(byParent['__root__'] || [])
+    for (let i = 0; i < categoryPathCodes.length; i++) {
+      const code = categoryPathCodes[i]
+      const children = byParent[code]
+      if (children && children.length > 0) {
+        levels.push(children)
+      }
+    }
+    return levels
+  }, [allCategories, categoryPathCodes])
+
+  const updatePath = (levelIndex: number, code: string) => {
+    setCategoryPathCodes(prev => {
+      const next = prev.slice(0, levelIndex)
+      if (code) next[levelIndex] = code
+      return next
+    })
   }
 
   return (
@@ -267,7 +362,7 @@ export default function DocumentIngestPage() {
                     <div>
                       <span className="font-medium text-green-700">제안된 카테고리:</span>
                       <span className="ml-2 text-green-600">
-                        {analysisResult.proposedCategory.majorName} &gt; {analysisResult.proposedCategory.midName} &gt; {analysisResult.proposedCategory.subName}
+                        {renderCategory()}
                       </span>
                     </div>
                   )}
@@ -280,6 +375,37 @@ export default function DocumentIngestPage() {
                 </div>
               </div>
             )}
+
+            {/* 수동 카테고리 선택 (가변 계층) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">카테고리 선택 (가변 계층)</label>
+              {categoryLoading && (
+                <div className="text-xs text-gray-500 mb-2">카테고리를 불러오는 중...</div>
+              )}
+              {categoryError && (
+                <div className="text-xs text-red-500 mb-2">{categoryError}</div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {levelOptions.map((options, idx) => (
+                  <select
+                    key={idx}
+                    className="px-2 py-1 border border-gray-300 rounded text-sm bg-white"
+                    value={categoryPathCodes[idx] || ''}
+                    onChange={(e) => updatePath(idx, e.target.value)}
+                  >
+                    <option value="">{idx === 0 ? '1레벨 선택' : '하위 선택'}</option>
+                    {options.map(o => (
+                      <option key={o.code} value={o.code}>{o.name} ({o.code})</option>
+                    ))}
+                  </select>
+                ))}
+              </div>
+              {selectedCategoryObject && (
+                <div className="mt-2 text-xs text-gray-600">
+                  선택된 경로: {selectedCategoryObject.displayPath}
+                </div>
+              )}
+            </div>
 
             {/* 목적 */}
             <div>

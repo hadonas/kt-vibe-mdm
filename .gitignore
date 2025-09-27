@@ -244,6 +244,7 @@ storage/
 temp/
 uploads/
 downloads/
+files/
 
 # Test files
 test_*.txt
@@ -261,6 +262,21 @@ test_*.pdf
 generated/
 *.generated.*
 
+# Backend logs and temporary files
+backend.log
+backend.log.*
+application.log
+spring.log
+
+# Container data and volumes
+data/
+mongodb_data/
+elasticsearch_data/
+
+# Temporary analysis files
+analysis_*.json
+extracted_text_*
+
 # ===========================================
 # Security
 # ===========================================
@@ -275,6 +291,21 @@ generated/
 # Secrets
 secrets/
 *.secret
+
+# JWT tokens and authentication
+token.txt
+*.token
+jwt_secret
+auth_tokens/
+refresh_tokens/
+
+# API keys and credentials
+api_keys/
+credentials/
+.credentials
+openai_key
+azure_key
+elastic_password
 
 # ===========================================
 # Package managers

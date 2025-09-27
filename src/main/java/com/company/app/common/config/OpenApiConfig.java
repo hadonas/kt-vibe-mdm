@@ -30,13 +30,13 @@ public class OpenApiConfig {
                                 - 파일 관리 시스템 (업로드, 다운로드, 분석)
                                 - 승인 워크플로우 (승인 요청 조회, 승인/반려 결정, 통계)
                                 - 문서 관리 (문서 목록, 계층 구조, 카테고리별 조회, 중복 검사)
-                                - 검색 및 채팅 (FAISS 벡터 검색, RAG 채팅)
+                                - 검색 및 채팅 (Elasticsearch 샤드 기반 하이브리드 벡터+텍스트 검색, RAG 채팅)
                                 - 공개 API (문서 수 조회, 파일 다운로드, 사용자별 문서 조회)
                                 
                                 기술 스택:
                                 - Backend: Spring Boot 3.2 + Java 17 + MongoDB 7.0
                                 - Frontend: Next.js 14 + TypeScript + React 18
-                                - Vector Search: FAISS + OpenAI Embeddings (1536차원)
+                                - Vector Search: Elasticsearch dense_vector + script_score (샤드 단위 fanout 검색)
                                 - Authentication: JWT + Role-based Access Control
                                 """)
                         .version("1.0.0")

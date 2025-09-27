@@ -1,6 +1,7 @@
 package com.company.app.search.util;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -15,7 +16,9 @@ import java.util.List;
 @Slf4j
 public class VectorShardingUtil {
     
-    private static final int DEFAULT_SHARD_COUNT = 4;
+    @Value("${vector.shard.count:4}")
+    private int shardCount;
+    
     private static final String HASH_ALGORITHM = "MD5";
     
     /**
@@ -62,7 +65,7 @@ public class VectorShardingUtil {
      * @return 샤드 ID
      */
     public int calculateShardId(List<Double> vector) {
-        return calculateShardId(vector, DEFAULT_SHARD_COUNT);
+        return calculateShardId(vector, shardCount);
     }
     
     /**
@@ -102,7 +105,7 @@ public class VectorShardingUtil {
      * @return 샤드 ID
      */
     public int calculateShardIdFromText(String text) {
-        return calculateShardIdFromText(text, DEFAULT_SHARD_COUNT);
+        return calculateShardIdFromText(text, shardCount);
     }
     
     /**
@@ -121,6 +124,6 @@ public class VectorShardingUtil {
      * @return 샤드 개수
      */
     public int getDefaultShardCount() {
-        return DEFAULT_SHARD_COUNT;
+        return shardCount;
     }
 }

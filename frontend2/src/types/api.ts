@@ -59,6 +59,22 @@ export interface Category {
   midName: string
   subCode: string
   subName: string
+  fullCode?: string // 전체 코드 (예: A-A01-A0101-A010101)
+  fullName?: string // 전체 경로 이름 (예: 소프트웨어 > 웹개발 > 프론트엔드 > React)
+  hierarchy?: CategoryLevel[] // 가변 계층 구조
+  // 새 헬퍼 필드 (백엔드 DTO 정규화 대비 프론트 안전성 향상)
+  leafCode?: string
+  leafName?: string
+  codes?: string[]
+  names?: string[]
+  depth?: number
+  displayPath?: string
+}
+
+export interface CategoryLevel {
+  level: number
+  code: string
+  name: string
 }
 
 export interface SimilarCandidate {
@@ -113,6 +129,8 @@ export interface ChatSource {
   docId: string
   serial: string
   snippet: string
+  filename?: string
+  score: number
 }
 
 // File Types

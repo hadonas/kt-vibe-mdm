@@ -1,5 +1,6 @@
 package com.company.app.file.service;
 
+import com.company.app.catalog.service.SmartClassificationService;
 import com.company.app.chat.service.LLMService;
 import com.company.app.common.dto.Category;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class FileAnalysisService {
     
     private final LLMService llmService;
+    private final SmartClassificationService smartClassificationService;
     private final ObjectMapper objectMapper;
     
     // 임시 파일 저장소 (메모리)
@@ -67,8 +69,76 @@ public class FileAnalysisService {
             throw new IllegalArgumentException("파일에서 텍스트를 추출할 수 없습니다.");
         }
         
-        // LLM을 통한 분석
-        return analyzeWithLLM(extractedText, file.getOriginalFilename());
+        // Elasticsearch 기반 스마트 분류 사용
+        return analyzeWithSmartClassification(extractedText, file.getOriginalFilename());
+    }
+    
+    private FileAnalysisResult analyzeWithSmartClassification(String extractedText, String fileName) {
+        try {
+            log.info("스마트 분류를 통한 파일 분석 시작: {}", fileName);
+            
+            // 1. LLM으로 목적과 제목 생성
+            String proposedPurpose = generatePurpose(extractedText);
+            String proposedTitle = generateTitle(fileName, extractedText);
+            
+            // 2. 스마트 분류로 카테고리 결정 (문서 요약과 제목 사용)
+            var classificationResult = smartClassificationService.classifyDocument(proposedPurpose, proposedTitle);
+            Category proposedCategory = classificationResult.getSelectedCategory();
+            
+            log.info("스마트 분류 완료: {} -> {}", fileName, proposedCategory.getFullName());
+            
+            FileAnalysisResult result = new FileAnalysisResult();
+            result.setProposedCategory(proposedCategory);
+            result.setProposedPurpose(proposedPurpose);
+            result.setProposedTitle(proposedTitle);
+            return result;
+            
+        } catch (Exception e) {
+            log.warn("스마트 분류 실패, LLM 분석으로 fallback: {}", e.getMessage());
+            return analyzeWithLLM(extractedText, fileName);
+        }
+    }
+    
+    private String generatePurpose(String extractedText) {
+        try {
+            String prompt = String.format("""
+                다음 문서의 목적이나 용도를 한 줄로 간단히 설명해주세요:
+                
+                %s
+                
+                응답은 간단한 텍스트로만 해주세요 (JSON 형식 말고).
+                """, extractedText.length() > 1000 ? extractedText.substring(0, 1000) + "..." : extractedText);
+            
+            return llmService.generateText(prompt).trim();
+        } catch (Exception e) {
+            log.warn("목적 생성 실패: {}", e.getMessage());
+            return "문서 목적 분석 중";
+        }
+    }
+    
+    private String generateTitle(String fileName, String extractedText) {
+        try {
+            String baseTitle = removeFileExtension(fileName);
+            
+            // 파일명이 의미있는 경우 그대로 사용
+            if (baseTitle.length() > 3 && !baseTitle.matches(".*\\d{4,}.*")) {
+                return baseTitle;
+            }
+            
+            // 파일명이 의미없는 경우 내용에서 제목 생성
+            String prompt = String.format("""
+                다음 문서 내용에 적합한 제목을 생성해주세요:
+                
+                %s
+                
+                응답은 간단한 제목만 해주세요 (JSON 형식 말고).
+                """, extractedText.length() > 500 ? extractedText.substring(0, 500) + "..." : extractedText);
+            
+            return llmService.generateText(prompt).trim();
+        } catch (Exception e) {
+            log.warn("제목 생성 실패: {}", e.getMessage());
+            return removeFileExtension(fileName);
+        }
     }
     
     private String extractTextFromFile(MultipartFile file) throws IOException {

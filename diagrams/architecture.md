@@ -10,8 +10,8 @@ graph TB
     end
 
     subgraph "Frontend Layer"
-        F[Next.js App]
-        UI[React Components]
+        F[Next.js App<br/>가변 계층 UI]
+        UI[React Components<br/>다단계 카테고리 선택]
     end
 
     subgraph "API Gateway Layer"
@@ -20,22 +20,24 @@ graph TB
 
     subgraph "Service Layer"
         AUTH[Auth Service]
-        FS[File Service]
-        IS[Ingest Service]
+        FS[File Service<br/>텍스트 추출]
+        IS[Ingest Service<br/>+ 스마트 분류]
         AS[Approval Service]
-        CS[Chat Service]
-        VSS[Vector Search Service]
-        PS[Public Service]
+        CS[Chat Service<br/>RAG]
+        SCS[Smart Classification<br/>Service]
+        CUS[Category Usage<br/>Service]
+        DDS[Document Deletion<br/>Service]
+        EIS[Elasticsearch Index<br/>Service]
     end
 
     subgraph "Data Layer"
-        M[(MongoDB)]
-        GridFS[GridFS]
-        FAISS[FAISS Vector Store]
+        M[(MongoDB<br/>가변 계층 문서)]
+        E[(Elasticsearch<br/>샤드 기반 검색)]
+        LocalFS[로컬 파일<br/>시스템]
     end
 
     subgraph "External Services"
-        AI[AI Service<br/>Ollama/OpenAI]
+        AI[AI Service<br/>Ollama/OpenAI<br/>분류 + 임베딩]
     end
 
     U --> F
@@ -48,22 +50,30 @@ graph TB
     API --> IS
     API --> AS
     API --> CS
-    API --> VSS
-    API --> PS
+    API --> SCS
+    API --> CUS
+    API --> DDS
+    API --> EIS
     
     AUTH --> M
-    FS --> GridFS
+    FS --> LocalFS
     IS --> M
-    IS --> GridFS
+    IS --> CUS
+    IS --> EIS
+    IS --> AI
     AS --> M
-    CS --> VSS
+    CS --> E
     CS --> AI
-    VSS --> FAISS
-    VSS --> M
-    PS --> M
-    PS --> FS
+    SCS --> AI
+    SCS --> M
+    CUS --> M
+    DDS --> M
+    DDS --> E
+    DDS --> LocalFS
+    DDS --> CUS
+    EIS --> E
     
-    AI --> FAISS
+    AI --> E
 ```
 
 ## 전체 시스템 구조

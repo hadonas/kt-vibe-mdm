@@ -6,10 +6,11 @@ import com.company.app.ingest.entity.IngestRequest;
 import com.company.app.ingest.repository.IngestRequestRepository;
 import com.company.app.file.service.LocalFileStorageService;
 import com.company.app.file.service.FileAnalysisService;
+import com.company.app.catalog.service.SmartClassificationService;
+import com.company.app.catalog.service.CategoryUsageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -25,6 +26,8 @@ public class IngestService {
     private final RepositoryAnalysisService repositoryAnalysisService;
     private final LocalFileStorageService localFileStorageService;
     private final FileAnalysisService fileAnalysisService;
+    private final SmartClassificationService smartClassificationService;
+    private final CategoryUsageService categoryUsageService;
     
     public Map<String, Object> createRepoPreview(String repoUrl, String accessToken) {
         try {
@@ -84,7 +87,7 @@ public class IngestService {
             ingestRequest.setOriginalFileName(request.getOriginalFileName());
         }
         
-        // DOCX/XLSX 파일의 경우 FileAnalysisService를 통해 내용 추출
+        // DOCX/XLSX 파일의 경우 FileAnalysisService를 통해 내용 추출 및 스마트 분류
         if (request.getFileIds() != null && !request.getFileIds().isEmpty()) {
             try {
                 String fileId = request.getFileIds().get(0);
@@ -92,14 +95,56 @@ public class IngestService {
                 String extractedText = fileAnalysisService.extractTextFromTemporaryFile(fileId);
                 if (extractedText != null && !extractedText.isEmpty()) {
                     ingestRequest.setExtractedText(extractedText);
+                    
+                    // 스마트 분류 시스템 사용
+                    try {
+                        log.info("파일 내용 기반 스마트 분류 시작: {}", request.getOriginalFileName());
+                        
+                        // 파일 내용을 요약으로 사용하여 분류
+                        String documentTitle = request.getOriginalFileName() != null ? 
+                            request.getOriginalFileName() : "업로드된 문서";
+                        String documentSummary = extractedText.length() > 1000 ? 
+                            extractedText.substring(0, 1000) + "..." : extractedText;
+                        
+                        SmartClassificationService.ClassificationResult classificationResult = 
+                            smartClassificationService.classifyDocument(documentSummary, documentTitle);
+                        
+                        if (classificationResult.isSuccessful()) {
+                            ingestRequest.setProposedCategory(classificationResult.getSelectedCategory());
+                            log.info("파일 스마트 분류 성공: {} -> {}", 
+                                documentTitle, classificationResult.getSelectedCategory().getFullCode());
+                        } else {
+                            log.warn("파일 스마트 분류 실패, 기본 카테고리 사용: {}", classificationResult.getReason());
+                            // 기본 카테고리 설정 (기타 대신 문서 타입에 따라)
+                            ingestRequest.setProposedCategory(getDefaultCategoryForFile(request.getOriginalFileName()));
+                        }
+                        
+                    } catch (Exception e) {
+                        log.error("파일 스마트 분류 중 오류, 기본 카테고리 사용", e);
+                        ingestRequest.setProposedCategory(getDefaultCategoryForFile(request.getOriginalFileName()));
+                    }
+                } else {
+                    log.warn("파일 내용 추출 결과가 비어있음");
+                    ingestRequest.setExtractedText("파일 내용을 추출할 수 없습니다.");
+                    ingestRequest.setProposedCategory(getDefaultCategoryForFile(request.getOriginalFileName()));
                 }
             } catch (Exception e) {
                 log.warn("파일 내용 추출 실패: {}", e.getMessage());
                 ingestRequest.setExtractedText("파일 내용을 추출할 수 없습니다.");
+                ingestRequest.setProposedCategory(getDefaultCategoryForFile(request.getOriginalFileName()));
             }
         }
         
         IngestRequest saved = ingestRequestRepository.save(ingestRequest);
+        // 카테고리 사용량 증가 (제안된 카테고리가 존재하면)
+        try {
+            if (saved.getProposedCategory() != null) {
+                Category cat = saved.getProposedCategory();
+                categoryUsageService.incrementUsage(cat.getCodes(), cat.getLeafCode());
+            }
+        } catch (Exception e) {
+            log.warn("카테고리 사용량 증가 실패: {}", e.getMessage());
+        }
         
         Map<String, Object> response = new HashMap<>();
         response.put("id", saved.getId());
@@ -137,6 +182,15 @@ public class IngestService {
         }
         
         IngestRequest saved = ingestRequestRepository.save(ingestRequest);
+        // 카테고리 사용량 증가
+        try {
+            if (saved.getProposedCategory() != null) {
+                Category cat = saved.getProposedCategory();
+                categoryUsageService.incrementUsage(cat.getCodes(), cat.getLeafCode());
+            }
+        } catch (Exception e) {
+            log.warn("카테고리 사용량 증가 실패: {}", e.getMessage());
+        }
         
         // 임시 저장소에 분석 결과 저장
         try {
@@ -170,5 +224,37 @@ public class IngestService {
         response.put("requestedAt", LocalDateTime.now());
         
         return response;
+    }
+    
+    /**
+     * 파일 확장자에 따른 기본 카테고리 결정
+     */
+    private Category getDefaultCategoryForFile(String fileName) {
+        if (fileName == null) {
+            return new Category("C", "서비스", "C", "서비스", "C", "서비스");
+        }
+        
+        String lowerFileName = fileName.toLowerCase();
+        
+        // 문서 파일들
+        if (lowerFileName.endsWith(".docx") || lowerFileName.endsWith(".doc") || 
+            lowerFileName.endsWith(".pdf") || lowerFileName.endsWith(".txt")) {
+            return new Category("C", "서비스", "C", "서비스", "C", "서비스");
+        }
+        
+        // 스프레드시트 파일들
+        if (lowerFileName.endsWith(".xlsx") || lowerFileName.endsWith(".xls") || 
+            lowerFileName.endsWith(".csv")) {
+            return new Category("A", "소프트웨어", "A04", "데이터 분석", "A04", "데이터 분석");
+        }
+        
+        // 이미지 파일들
+        if (lowerFileName.endsWith(".png") || lowerFileName.endsWith(".jpg") || 
+            lowerFileName.endsWith(".jpeg") || lowerFileName.endsWith(".gif")) {
+            return new Category("C", "서비스", "C", "서비스", "C", "서비스");
+        }
+        
+        // 기본값
+        return new Category("C", "서비스", "C", "서비스", "C", "서비스");
     }
 }

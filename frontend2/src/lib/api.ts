@@ -70,11 +70,15 @@ export const adminApi = {
   getDocuments: (page = 0, size = 20) => 
     api.get(`/admin/documents?page=${page}&size=${size}`),
   
-  // Get document hierarchy
+  // Get document hierarchy (가변 계층 지원)
   getDocumentHierarchy: () => 
     api.get('/admin/documents/hierarchy'),
   
-  // Get files by category
+  // Get documents by category (가변 계층 지원)
+  getDocumentsByCategory: (categoryCode: string, page = 0, size = 20) => 
+    api.get(`/admin/documents/category/${encodeURIComponent(categoryCode)}?page=${page}&size=${size}`),
+  
+  // Get files by category (legacy 3-level support)
   getFilesByCategory: (majorCode: string, midCode: string, subCode: string) => 
     api.get(`/admin/files/category/${majorCode}/${midCode}/${subCode}`),
   
@@ -84,7 +88,85 @@ export const adminApi = {
   
   // Delete document by code
   deleteDocumentByCode: (code: string) => 
-    api.delete(`/admin/documents/${code}`)
+    api.delete(`/admin/documents/${code}`),
+  
+  // Delete documents by category
+  deleteDocumentsByCategory: (categoryCode: string) => 
+    api.delete(`/admin/documents/category/${encodeURIComponent(categoryCode)}`),
+}
+
+// Category API functions (스마트 카테고리 관리)
+export const categoryApi = {
+  // Get all categories
+  getCategories: () => 
+    api.get('/categories'),
+  
+  // Get category by code
+  getCategory: (code: string) => 
+    api.get(`/categories/${code}`),
+  
+  // Create new category
+  createCategory: (data: any) => 
+    api.post('/categories', data),
+  
+  // Update category
+  updateCategory: (code: string, data: any) => 
+    api.put(`/categories/${code}`, data),
+  
+  // Search categories
+  searchCategories: (query: string, limit = 10) => 
+    api.get(`/categories/search?query=${encodeURIComponent(query)}&limit=${limit}`),
+  
+  // Classify document
+  classifyDocument: (data: { title: string; summary: string }) => 
+    api.post('/categories/classify', data),
+  
+  // Preview category metadata
+  previewMetadata: (data: { name: string; code: string; parentCode?: string; level: number }) => 
+    api.post('/categories/metadata/preview', data),
+  
+  // Auto-fill category fields
+  autoFillCategory: (code: string) => 
+    api.post(`/categories/${code}/auto-fill`),
+  
+  // Auto-fill all categories
+  autoFillAllCategories: () => 
+    api.post('/categories/auto-fill-all'),
+  
+  // Regenerate all embeddings
+  regenerateAllEmbeddings: () => 
+    api.post('/categories/embeddings/regenerate'),
+  
+  // Regenerate category embedding
+  regenerateCategoryEmbedding: (code: string) => 
+    api.post(`/categories/${code}/embedding`),
+  
+  // Reclassify all documents
+  reclassifyAllDocuments: () => 
+    api.post('/categories/reclassify/all'),
+  
+  // Reclassify documents by category
+  reclassifyDocumentsByCategory: (categoryCode: string) => 
+    api.post(`/categories/reclassify/category/${categoryCode}`),
+  
+  // Get document counts by category
+  getDocumentCounts: () => 
+    api.get('/categories/document-counts'),
+  
+  // Get documents by category
+  getCategoryDocuments: (categoryCode: string, page: number = 0, size: number = 20) => 
+    api.get(`/categories/${categoryCode}/documents?page=${page}&size=${size}`),
+  
+  // Force regenerate all category metadata with LLM
+  forceRegenerateAllMetadata: () => 
+    api.post('/categories/force-regenerate-metadata'),
+}
+
+// Search API
+export const searchApi = {
+  // Reindex all documents
+  reindexDocuments: () =>
+    api.post('/search/reindex'),
 }
 
 export default api

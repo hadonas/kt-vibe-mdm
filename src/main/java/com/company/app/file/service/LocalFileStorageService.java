@@ -18,6 +18,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -202,7 +203,70 @@ public class LocalFileStorageService {
             throw new IllegalArgumentException("문서에 카테고리 정보가 없습니다.");
         }
         
-        // 경로: /storage/대분류코드_대분류명/중분류코드_중분류명/소분류코드_소분류명/
+        try {
+            // 가변 계층 구조 지원: 카테고리 계층을 동적으로 구성
+            List<String> pathComponents = buildCategoryHierarchyPath(category);
+            
+            // 경로 구성: /storage/level1_name/level2_name/.../levelN_name/
+            Path basePath = Paths.get(storageBasePath);
+            for (String component : pathComponents) {
+                basePath = basePath.resolve(component);
+            }
+            
+            log.debug("문서 저장 경로 생성: {} -> {}", category.getFullCode(), basePath);
+            return basePath;
+            
+        } catch (Exception e) {
+            log.error("문서 경로 생성 중 오류: {}", e.getMessage(), e);
+            // Fallback: 기존 3레벨 구조 사용
+            return createLegacyDocumentPath(category);
+        }
+    }
+    
+    /**
+     * 카테고리 계층을 기반으로 파일 시스템 경로 구성 요소 생성
+     */
+    private List<String> buildCategoryHierarchyPath(Category category) {
+        List<String> pathComponents = new ArrayList<>();
+        // Prefer hierarchy helper methods
+        if (category.getHierarchy() != null && !category.getHierarchy().isEmpty()) {
+            category.getHierarchy().forEach(level -> {
+                String dirName = String.format("%s_%s", level.getCode(), sanitizeFileName(level.getName()));
+                pathComponents.add(dirName);
+            });
+            return pathComponents;
+        }
+        // Fallback to fullCode parsing if present
+        String fullCode = category.getFullCode();
+        if (fullCode != null && fullCode.contains("-")) {
+            String[] codes = fullCode.split("-");
+            for (String code : codes) {
+                try {
+                    CatalogNode node = catalogNodeRepository.findByCode(code).orElse(null);
+                    if (node != null) {
+                        String dirName = String.format("%s_%s", code, sanitizeFileName(node.getName()));
+                        pathComponents.add(dirName);
+                    } else {
+                        pathComponents.add(code);
+                    }
+                } catch (Exception e) {
+                    log.warn("카테고리 정보 조회 실패: {}", code, e);
+                    pathComponents.add(code);
+                }
+            }
+            return pathComponents;
+        }
+        // Legacy fallback
+        pathComponents.add(String.format("%s_%s", category.getMajorCode(), sanitizeFileName(category.getMajorName())));
+        pathComponents.add(String.format("%s_%s", category.getMidCode(), sanitizeFileName(category.getMidName())));
+        pathComponents.add(String.format("%s_%s", category.getSubCode(), sanitizeFileName(category.getSubName())));
+        return pathComponents;
+    }
+    
+    /**
+     * 레거시 3레벨 고정 경로 생성 (Fallback)
+     */
+    private Path createLegacyDocumentPath(Category category) {
         String majorDir = String.format("%s_%s", category.getMajorCode(), sanitizeFileName(category.getMajorName()));
         String midDir = String.format("%s_%s", category.getMidCode(), sanitizeFileName(category.getMidName()));
         String subDir = String.format("%s_%s", category.getSubCode(), sanitizeFileName(category.getSubName()));
@@ -290,9 +354,7 @@ public class LocalFileStorageService {
         content.append("## 문서 정보\n");
         content.append("- **코드번호**: ").append(document.getSerial().getFull()).append("\n");
         content.append("- **제목**: ").append(document.getPurpose()).append("\n");
-        content.append("- **분류**: ").append(document.getCategory().getMajorName())
-                .append(" > ").append(document.getCategory().getMidName())
-                .append(" > ").append(document.getCategory().getSubName()).append("\n");
+        content.append("- **분류**: ").append(document.getCategory().getDisplayPath()).append("\n");
         content.append("- **등록일**: ").append(document.getCreatedAt()).append("\n");
         content.append("- **승인일**: ").append(document.getApprovedAt() != null ? document.getApprovedAt() : "미승인").append("\n");
         content.append("- **등록자**: ").append(document.getOwnerId()).append("\n\n");
@@ -334,9 +396,7 @@ public class LocalFileStorageService {
         content.append("## 문서 정보\n");
         content.append("- **코드번호**: ").append(document.getSerial().getFull()).append("\n");
         content.append("- **제목**: ").append(document.getPurpose()).append("\n");
-        content.append("- **분류**: ").append(document.getCategory().getMajorName())
-                .append(" > ").append(document.getCategory().getMidName())
-                .append(" > ").append(document.getCategory().getSubName()).append("\n");
+        content.append("- **분류**: ").append(document.getCategory().getDisplayPath()).append("\n");
         content.append("- **등록일**: ").append(document.getCreatedAt()).append("\n");
         content.append("- **승인일**: ").append(document.getApprovedAt() != null ? document.getApprovedAt() : "미승인").append("\n");
         content.append("- **등록자**: ").append(document.getOwnerId()).append("\n\n");
@@ -680,16 +740,20 @@ public class LocalFileStorageService {
                 return null;
             }
             
-            // 카테고리 경로 생성
-            String majorDir = document.getCategory().getMajorCode() + "_" + sanitizeFileName(document.getCategory().getMajorName());
-            String midDir = document.getCategory().getMidCode() + "_" + sanitizeFileName(document.getCategory().getMidName());
-            String subDir = document.getCategory().getSubCode() + "_" + sanitizeFileName(document.getCategory().getSubName());
+            // 가변 계층 구조 지원: 동적 경로 생성
+            List<String> pathComponents = buildCategoryHierarchyPath(document.getCategory());
             
             // 파일명 생성
             String fileName = generateFileName(document);
             
-            Path filePath = Paths.get(storageBasePath, majorDir, midDir, subDir, fileName);
+            // 경로 구성
+            Path basePath = Paths.get(storageBasePath);
+            for (String component : pathComponents) {
+                basePath = basePath.resolve(component);
+            }
+            Path filePath = basePath.resolve(fileName);
             
+            log.debug("문서 파일 경로 조회: {} -> {}", document.getSerial().getFull(), filePath);
             return filePath.toString();
             
         } catch (Exception e) {
@@ -707,20 +771,59 @@ public class LocalFileStorageService {
                 return null;
             }
             
-            // 카테고리 경로 생성
-            String majorDir = document.getCategory().getMajorCode() + "_" + sanitizeFileName(document.getCategory().getMajorName());
-            String midDir = document.getCategory().getMidCode() + "_" + sanitizeFileName(document.getCategory().getMidName());
-            String subDir = document.getCategory().getSubCode() + "_" + sanitizeFileName(document.getCategory().getSubName());
+            // 가변 계층 구조 지원: 동적 경로 생성
+            List<String> pathComponents = buildCategoryHierarchyPath(document.getCategory());
             
             // 파일명 생성
             String fileName = generateFileName(document);
             
-            Path filePath = Paths.get(storageBasePath, majorDir, midDir, subDir, fileName);
+            // 경로 구성
+            Path basePath = Paths.get(storageBasePath);
+            for (String component : pathComponents) {
+                basePath = basePath.resolve(component);
+            }
+            Path filePath = basePath.resolve(fileName);
             
             if (Files.exists(filePath)) {
+                log.debug("기존 문서 파일 경로 조회 성공: {} -> {}", document.getSerial().getFull(), filePath);
                 return filePath.toString();
             }
             
+            // 파일이 없으면 레거시 경로도 시도
+            Path legacyPath = createLegacyDocumentPath(document.getCategory()).resolve(fileName);
+            if (Files.exists(legacyPath)) {
+                log.debug("레거시 경로에서 문서 파일 발견: {} -> {}", document.getSerial().getFull(), legacyPath);
+                return legacyPath.toString();
+            }
+            
+            // 전체 storage 디렉토리에서 파일명으로 검색
+            try {
+                Path storageRoot = Paths.get(storageBasePath);
+                String searchFileName = fileName;
+                
+                // 파일명에서 특수문자를 제거한 버전도 검색
+                String serialCode = document.getSerial().getFull();
+                String alternativeFileName = serialCode + "_";
+                
+                Path foundFile = Files.walk(storageRoot)
+                    .filter(Files::isRegularFile)
+                    .filter(path -> {
+                        String pathFileName = path.getFileName().toString();
+                        return pathFileName.equals(searchFileName) || 
+                               pathFileName.startsWith(alternativeFileName);
+                    })
+                    .findFirst()
+                    .orElse(null);
+                
+                if (foundFile != null) {
+                    log.debug("전체 검색으로 문서 파일 발견: {} -> {}", document.getSerial().getFull(), foundFile);
+                    return foundFile.toString();
+                }
+            } catch (Exception e) {
+                log.warn("전체 파일 검색 중 오류: {}", e.getMessage(), e);
+            }
+            
+            log.debug("문서 파일을 찾을 수 없음: {}", document.getSerial().getFull());
             return null;
             
         } catch (Exception e) {
@@ -739,29 +842,45 @@ public class LocalFileStorageService {
                 return false;
             }
             
-            // 카테고리 경로 생성
-            String majorDir = document.getCategory().getMajorCode() + "_" + sanitizeFileName(document.getCategory().getMajorName());
-            String midDir = document.getCategory().getMidCode() + "_" + sanitizeFileName(document.getCategory().getMidName());
-            String subDir = document.getCategory().getSubCode() + "_" + sanitizeFileName(document.getCategory().getSubName());
+            // 가변 계층 구조 지원: 동적 경로 생성
+            List<String> pathComponents = buildCategoryHierarchyPath(document.getCategory());
             
             // 파일명 생성
             String fileName = generateFileName(document);
             
-            Path filePath = Paths.get(storageBasePath, majorDir, midDir, subDir, fileName);
+            // 경로 구성
+            Path basePath = Paths.get(storageBasePath);
+            for (String component : pathComponents) {
+                basePath = basePath.resolve(component);
+            }
+            Path filePath = basePath.resolve(fileName);
             
+            boolean deleted = false;
+            
+            // 새로운 경로에서 파일 삭제 시도
             if (Files.exists(filePath)) {
-                boolean deleted = Files.deleteIfExists(filePath);
+                deleted = Files.deleteIfExists(filePath);
                 if (deleted) {
-                    log.info("파일 삭제 성공: {}", filePath);
+                    log.info("파일 삭제 성공 (새 경로): {}", filePath);
+                    return true;
+                }
+            }
+            
+            // 레거시 경로에서도 삭제 시도
+            Path legacyPath = createLegacyDocumentPath(document.getCategory()).resolve(fileName);
+            if (Files.exists(legacyPath)) {
+                deleted = Files.deleteIfExists(legacyPath);
+                if (deleted) {
+                    log.info("파일 삭제 성공 (레거시 경로): {}", legacyPath);
                     return true;
                 } else {
-                    log.warn("파일 삭제 실패: {}", filePath);
+                    log.warn("파일 삭제 실패 (레거시 경로): {}", legacyPath);
                     return false;
                 }
-            } else {
-                log.info("삭제할 파일이 존재하지 않음: {}", filePath);
-                return true; // 파일이 없으면 삭제 성공으로 간주
             }
+            
+            log.info("삭제할 파일이 존재하지 않음: {}", document.getSerial().getFull());
+            return true; // 파일이 없으면 삭제 성공으로 간주
             
         } catch (Exception e) {
             log.error("문서 파일 삭제 중 오류 발생: {}", e.getMessage(), e);
@@ -971,6 +1090,55 @@ public class LocalFileStorageService {
         } catch (Exception e) {
             log.error("코드로 파일 삭제 중 오류 발생: {}", e.getMessage(), e);
             return false;
+        }
+    }
+    
+    /**
+     * 문서 파일의 내용을 바이트 배열로 반환 (다운로드용)
+     */
+    public byte[] getDocumentFileBytes(DocumentEntity document) {
+        try {
+            String filePath = getExistingDocumentFilePath(document);
+            if (filePath == null) {
+                log.warn("문서 파일을 찾을 수 없음: {}", document.getId());
+                return null;
+            }
+            
+            Path path = Paths.get(filePath);
+            if (!Files.exists(path)) {
+                log.warn("파일이 존재하지 않음: {}", filePath);
+                return null;
+            }
+            
+            byte[] fileBytes = Files.readAllBytes(path);
+            log.debug("문서 파일 읽기 성공: {} ({}바이트)", filePath, fileBytes.length);
+            return fileBytes;
+            
+        } catch (Exception e) {
+            log.error("문서 파일 읽기 중 오류 발생: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    /**
+     * 문서의 원본 파일명 반환 (확장자 포함)
+     */
+    public String getDocumentFileName(DocumentEntity document) {
+        try {
+            String filePath = getExistingDocumentFilePath(document);
+            if (filePath == null) {
+                // 파일이 없으면 기본 파일명 생성
+                String serialCode = document.getSerial() != null ? document.getSerial().getFull() : document.getId();
+                return serialCode + ".txt";
+            }
+            
+            Path path = Paths.get(filePath);
+            return path.getFileName().toString();
+            
+        } catch (Exception e) {
+            log.error("문서 파일명 조회 중 오류 발생: {}", e.getMessage(), e);
+            String serialCode = document.getSerial() != null ? document.getSerial().getFull() : document.getId();
+            return serialCode + ".txt";
         }
     }
 }

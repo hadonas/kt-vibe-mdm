@@ -58,7 +58,7 @@ export const mockApiResponses = {
 
   // Chat API Mock
   chatQuery: (query: string): ChatQueryResponse => ({
-    answer: `죄송합니다. RAG 채팅 기능은 아직 구현되지 않았습니다. 
+    answer: `죄송합니다. AI 채팅 기능은 아직 구현되지 않았습니다. 
 
 현재 질문: "${query}"
 
@@ -71,6 +71,22 @@ export const mockApiResponses = {
         docId: 'mock-doc-1',
         serial: 'MOCK-001',
         snippet: '이것은 모의 문서 소스입니다.',
+        filename: 'MOCK-001.md',
+        score: 0.85,
+      },
+      {
+        docId: 'mock-doc-2',
+        serial: 'MOCK-002',
+        snippet: '이것은 두 번째 모의 문서 소스입니다.',
+        filename: 'MOCK-002.md',
+        score: 0.72,
+      },
+      {
+        docId: 'mock-doc-3',
+        serial: 'MOCK-003',
+        snippet: '이것은 세 번째 모의 문서 소스입니다.',
+        filename: 'MOCK-003.md',
+        score: 0.68,
       }
     ],
   }),

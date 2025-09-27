@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useAuth } from '@/contexts/AuthContexts'
-import api from '@/lib/api'
+import api, { searchApi } from '@/lib/api'
 import { ChatQueryRequest, ChatQueryResponse } from '@/types/api'
 import { formatDate } from '@/lib/utils'
 import { mockApi } from '@/lib/mock-api'
@@ -28,6 +28,9 @@ interface ChatMessage {
     docId: string
     serial: string
     snippet: string
+    filename?: string
+    score: number
+  categoryPath?: string // optional hierarchical category path from backend
   }>
   timestamp: Date
 }
@@ -107,7 +110,7 @@ export default function ChatPage() {
       setMessages([{
         id: 'welcome',
         type: 'assistant',
-        content: '안녕하세요! MDM RAG 채팅 시스템입니다.\n\n등록된 문서들에 대해 질문해주세요. 관련 문서를 검색하여 정확한 답변을 드리겠습니다.\n\n예시 질문:\n• "프로젝트 계획서에 대해 알려주세요"\n• "React 관련 문서가 있나요?"\n• "최근 등록된 API 문서를 찾아주세요"',
+        content: '안녕하세요! MDM AI 채팅 시스템입니다.\n\n등록된 문서들에 대해 질문해주세요. 관련 문서를 검색하여 정확한 답변을 드리겠습니다.\n\n예시 질문:\n• "프로젝트 계획서에 대해 알려주세요"\n• "React 관련 문서가 있나요?"\n• "최근 등록된 API 문서를 찾아주세요"',
         timestamp: new Date()
       }])
     }
@@ -156,11 +159,14 @@ export default function ChatPage() {
 
         const response = await api.post<ChatQueryResponse>('/chat/query', request)
         
+        // 소스를 관련도(점수) 순으로 정렬 (내림차순)
+        const sortedSources = response.data.sources?.sort((a, b) => (b.score || 0) - (a.score || 0)) || []
+        
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           type: 'assistant',
           content: response.data.answer,
-          sources: response.data.sources,
+          sources: sortedSources,
           timestamp: new Date()
         }
 
@@ -170,11 +176,14 @@ export default function ChatPage() {
         console.warn('Using mock API for /chat/query - backend not implemented yet')
         const mockResponse = await mockApi.chatQuery(userMessage.content)
         
+        // 소스를 관련도(점수) 순으로 정렬 (내림차순) - Mock API도 동일하게 처리
+        const sortedSources = mockResponse.sources?.sort((a, b) => (b.score || 0) - (a.score || 0)) || []
+        
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           type: 'assistant',
           content: mockResponse.answer,
-          sources: mockResponse.sources,
+          sources: sortedSources,
           timestamp: new Date()
         }
 
@@ -189,11 +198,14 @@ export default function ChatPage() {
         console.warn('Falling back to mock chat API')
         const mockResponse = await mockApi.chatQuery(userMessage.content)
         
+        // 소스를 관련도(점수) 순으로 정렬 (내림차순) - Fallback Mock API도 동일하게 처리
+        const sortedSources = mockResponse.sources?.sort((a, b) => (b.score || 0) - (a.score || 0)) || []
+        
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           type: 'assistant',
           content: mockResponse.answer,
-          sources: mockResponse.sources,
+          sources: sortedSources,
           timestamp: new Date()
         }
 
@@ -310,6 +322,11 @@ export default function ChatPage() {
                             <p className="text-gray-600 line-clamp-2">
                               {source.snippet}
                             </p>
+                            {source.categoryPath && (
+                              <div className="text-[10px] text-gray-400 mt-1 truncate" title={source.categoryPath}>
+                                {source.categoryPath}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
