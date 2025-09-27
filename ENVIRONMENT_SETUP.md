@@ -7,9 +7,10 @@ MDM (Monolithic Document Management) 시스템의 환경변수 설정 방법을 
 1. [빠른 시작](#빠른-시작)
 2. [환경변수 파일 생성](#환경변수-파일-생성)
 3. [주요 설정 항목](#주요-설정-항목)
-4. [환경별 설정](#환경별-설정)
-5. [보안 고려사항](#보안-고려사항)
-6. [문제 해결](#문제-해결)
+4. [새로운 기능 설정](#새로운-기능-설정)
+5. [환경별 설정](#환경별-설정)
+6. [보안 고려사항](#보안-고려사항)
+7. [문제 해결](#문제-해결)
 
 ## 🚀 빠른 시작
 
@@ -98,6 +99,10 @@ EMBEDDING_API_BASE=http://localhost:11434
 EMBEDDING_MODEL=text-embed-3
 LLM_API_BASE=http://localhost:11434
 LLM_MODEL=llama3.2
+
+# 분류 관련 설정
+CLASSIFICATION_CANDIDATE_COUNT=10
+CLASSIFICATION_CONFIDENCE_THRESHOLD=0.8
 ```
 
 #### OpenAI
@@ -108,12 +113,12 @@ LLM_API_BASE=https://api.openai.com/v1
 LLM_MODEL=gpt-4
 AI_API_KEY=sk-your-openai-api-key
  
-# 벡터 검색 샤딩 및 검색 동작 (신규)
+# 벡터 검색 샤딩 및 검색 동작
 VECTOR_SHARD_COUNT=4
 VECTOR_SEARCH_FANOUT=1                 # 기준 샤드 좌우 fanout 범위
 VECTOR_SEARCH_MIN_SUFFICIENT_RATIO=0.5 # 1차 결과 수 부족 시 전체 샤드 확장 임계 비율
  
-# 스마트 문서 분류 (카테고리 후보 개수 - 내부 topK는 *2 로 활용)
+# 스마트 문서 분류 (카테고리 후보 개수)
 CLASSIFICATION_CANDIDATE_COUNT=5
 ```
 
@@ -139,9 +144,10 @@ MAIL_FROM=noreply@yourdomain.com
 
 ### 📁 파일 저장소 설정
 
-#### GridFS (기본값)
+#### 로컬 파일 시스템 (기본값)
 ```bash
-FILE_STORAGE_TYPE=gridfs
+FILE_STORAGE_TYPE=local
+LOCAL_FILE_PATH=/app/storage
 ```
 
 #### AWS S3
@@ -153,10 +159,43 @@ AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 ```
 
-#### 로컬 파일 시스템
+## 🆕 새로운 기능 설정
+
+### 가변 계층 카테고리 시스템
+
 ```bash
-FILE_STORAGE_TYPE=local
-LOCAL_FILE_PATH=/app/files
+# 카테고리 사용량 추적 활성화
+CATEGORY_USAGE_TRACKING=true
+
+# 최대 계층 깊이 (기본값: 무제한)
+MAX_CATEGORY_DEPTH=5
+
+# 카테고리 자동 정리 (사용량 0인 카테고리 삭제)
+AUTO_CLEANUP_UNUSED_CATEGORIES=false
+```
+
+### 통합 문서 삭제 시스템
+
+```bash
+# 삭제 시 백업 생성
+ENABLE_DELETION_BACKUP=true
+BACKUP_RETENTION_DAYS=30
+
+# 카테고리 카운트 자동 업데이트
+AUTO_UPDATE_CATEGORY_COUNTS=true
+```
+
+### 스마트 분류 시스템
+
+```bash
+# 분류 신뢰도 임계값
+CLASSIFICATION_CONFIDENCE_THRESHOLD=0.8
+
+# 후보 카테고리 필터링 활성화
+ENABLE_CANDIDATE_FILTERING=true
+
+# LLM Tie-breaking 활성화
+ENABLE_LLM_TIE_BREAKING=true
 ```
 
 ## 🌍 환경별 설정

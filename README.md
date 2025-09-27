@@ -1,21 +1,23 @@
 # MDM (Monolithic Document Management)
 
-모놀리식 문서 관리 시스템 POC - Spring Boot + Next.js + MongoDB Atlas/Vector Search
+모놀리식 문서 관리 시스템 - Spring Boot + Next.js + MongoDB + Elasticsearch
 
 ## 🎯 프로젝트 개요
 
-대분류-중분류-소분류 기반 분류, 소분류코드-연번 일련번호 자동 부여, RAG 검색으로 중복 프로젝트 방지를 위한 문서 관리 시스템입니다.
+가변 계층 분류 체계와 스마트 문서 분류, RAG 기반 검색으로 효율적인 문서 관리를 제공하는 시스템입니다.
 
 ### 주요 기능
 
-- **📁 문서 분류**: 대/중/소 분류 체계 기반 자동 분류
-- **🔢 일련번호 관리**: 소분류코드-연번 자동 부여
-- **🔍 RAG 검색**: Vector Search를 통한 중복 프로젝트 방지
+- **📁 가변 계층 분류**: 1~N 레벨 분류 체계 지원 (기존 3단계 호환)
+- **🤖 스마트 분류**: AI 기반 자동 문서 분류 및 카테고리 제안
+- **🔢 일련번호 관리**: 분류별 자동 연번 부여
+- **🔍 하이브리드 검색**: Vector + BM25 결합 검색 엔진
 - **📄 레포지토리 분석**: GitHub 레포지토리 자동 개요 생성
-- **📋 사업계획서 처리**: DOCX/XLSX 파일 텍스트 추출 및 분석
-- **📦 벌크 등록**: ZIP/CSV 파일 일괄 처리
+- **📋 문서 처리**: DOCX/XLSX 파일 텍스트 추출 및 분석
+- **� RAG 챗봇**: 문서 기반 질의응답 시스템
 - **✅ 승인 워크플로우**: AI 제안 vs 수동 분류 승인 시스템
-- **👥 협업 기능**: 문서 공유, 소유권 이관, 버전 관리
+- **� 카테고리 통계**: 문서 사용량 추적 및 관리
+- **🗂️ 통합 삭제**: 계층 인식 데이터 정리 시스템
 
 ## 🏗️ 아키텍처
 
@@ -23,15 +25,20 @@
 ```
 com.company.app
 ├── auth          # 인증 (JWT, 로컬 계정)
-├── catalog       # 카탈로그 관리 (분류 체계)
+├── catalog       # 카탈로그 관리 (가변 계층 분류 체계)
+│   ├── entity    # CatalogNode (계층 구조 + 문서 카운트)
+│   ├── service   # CategoryUsageService, SmartClassificationService
+│   └── controller# 분류 생성/수정/삭제 API
 ├── ingest        # 문서 수집 (개별/벌크)
-├── repo          # 레포지토리 분석
+│   └── service   # 스마트 분류 통합
 ├── approval      # 승인 워크플로우
 ├── search        # 하이브리드 검색 (Elasticsearch 샤드 기반)
 ├── document      # 문서 관리
+│   └── service   # DocumentDeletionService (통합 삭제)
 ├── chat          # RAG 챗봇
-├── file          # 파일 처리
-└── common        # 공통 기능
+├── file          # 파일 처리 (텍스트 추출)
+├── admin         # 관리자 기능 (문서/카테고리 관리)
+└── common        # 공통 기능 (Category DTO 등)
 ```
 
 **Java 17** 기반으로 구축되었습니다.
@@ -44,9 +51,9 @@ com.company.app
 - **Docker** (컨테이너화)
 
 ### 데이터베이스
-- **MongoDB** (문서/메타데이터)
+- **MongoDB** (문서/메타데이터, 가변 계층 카테고리)
 - **Elasticsearch** (샤드 기반 하이브리드 벡터 + BM25 검색)
-- **GridFS** (파일 저장)
+- **로컬 파일 시스템** (문서 원본 저장)
 
 ## 🚀 빠른 시작
 
@@ -125,9 +132,25 @@ npm run build
 
 - **users**: 사용자 정보
 - **ingest_requests**: 등록 요청
-- **documents**: 승인된 문서
-- **catalog_nodes**: 카탈로그 트리
+- **documents**: 승인된 문서 (가변 계층 카테고리 포함)
+- **document_chunks**: 문서 청크 (검색용)
+- **catalog_nodes**: 가변 계층 카탈로그 (문서 카운트 포함)
 - **counters**: 일련번호 카운터
+
+### 가변 계층 카테고리 구조
+
+```json
+{
+  "majorCode": "A",           // 기존 호환성
+  "majorName": "소프트웨어",
+  "hierarchy": [              // 새로운 가변 구조
+    {"level": 1, "code": "A", "name": "소프트웨어"},
+    {"level": 2, "code": "A05", "name": "AI/머신러닝"},
+    {"level": 3, "code": "A0501", "name": "자연어처리"}
+  ],
+  "fullCode": "A-A05-A0501",
+  "fullName": "소프트웨어 > AI/머신러닝 > 자연어처리"
+}
 
 ### 검색 아키텍처 (Shard-Aware Hybrid)
 
@@ -223,35 +246,45 @@ ADMIN_EMAIL=admin@company.com
 
 #### 관리자 API (Admin)
 - `GET /api/admin/documents` - 모든 문서 목록 조회
-- `GET /api/admin/documents/hierarchy` - 문서 계층 구조 조회
-- `GET /api/admin/documents/codes` - 코드별 문서 조회
+- `GET /api/admin/documents/hierarchy` - 가변 계층 문서 구조 조회
+- `DELETE /api/admin/documents/category/{categoryCode}` - 카테고리별 문서 삭제
+- `DELETE /api/admin/documents/{code}` - 코드로 문서 삭제
+
+#### 카테고리 API (Categories)
+- `GET /api/categories` - 모든 카테고리 조회 (평면 목록)
+- `GET /api/categories/tree` - 계층 트리 구조 조회
+- `POST /api/categories` - 새 카테고리 생성
+- `PUT /api/categories/{code}` - 카테고리 수정
+- `DELETE /api/categories/{code}` - 카테고리 삭제
+
+#### 스마트 분류 API
+- `POST /api/categories/classify` - 텍스트 기반 자동 분류
+- `GET /api/categories/search` - 카테고리 검색
+
+#### 문서 수집 API (Ingest)
+- `POST /api/ingest/single` - 단일 문서/레포지토리 등록
+- `POST /api/ingest/{id}/resubmit` - 재등록/수정
+
+#### 파일 처리 API
+- `POST /api/files/upload` - 파일 업로드
+- `POST /api/files/analyze` - 파일 분석 (텍스트 추출 + 분류 제안)
+- `GET /api/files/download/{id}` - 파일 다운로드
+
+#### RAG 챗봇 API
+- `POST /api/chat/query` - 문서 기반 질의응답
+- `GET /api/chat/history` - 채팅 히스토리
 - `GET /api/admin/documents/category/{majorCode}/{midCode}/{subCode}` - 카테고리별 문서 조회
 - `GET /api/admin/files/hierarchy` - 파일 계층 구조 조회
 - `GET /api/admin/files/category/{majorCode}/{midCode}/{subCode}` - 카테고리별 파일 조회
 - `DELETE /api/admin/documents/{code}` - 문서 삭제
-- `GET /api/admin/documents/duplicates` - 중복 문서 조회
-
 #### 승인 관리 (Approval)
 - `GET /api/approval/requests` - 승인 요청 목록 조회
 - `GET /api/approval/requests/{id}` - 승인 요청 상세 조회
 - `POST /api/approval/requests/{id}/decide` - 승인/반려 결정
-- `GET /api/approval/my-requests` - 사용자별 승인 요청 조회
-- `GET /api/approval/stats` - 승인 요청 통계 조회
 
-#### 문서 수집 (Ingest)
-- `POST /api/ingest/single` - 개별 등록 (레포 URL 또는 파일)
-- `POST /api/ingest/{id}/resubmit` - 재등록/수정 (버전업)
+### Swagger UI 접속
 
-#### 파일 관리 (File)
-- `POST /api/files/analyze` - 파일 분석 (카테고리 및 목적 추출)
-- `POST /api/files/upload` - 파일 업로드
-- `GET /api/files/download/{fileId}` - 파일 다운로드
-
-#### 검색 및 채팅 (Search & Chat)
-- `POST /api/search/reindex` - 벡터 인덱스 재구성
-- `POST /api/chat/query` - RAG 채팅 쿼리
-
-자세한 API 문서는 Swagger UI에서 확인할 수 있습니다.
+자세한 API 문서는 **http://localhost:8080/api/swagger-ui.html** 에서 확인할 수 있습니다.
 
 ## 🧪 테스트
 
@@ -288,18 +321,39 @@ npm run build
 ### Docker 이미지 빌드
 
 ```bash
-# 백엔드
-docker build -f Dockerfile.backend -t mdm-backend .
+# 전체 스택 빌드 및 실행
+docker-compose up -d --build
 
-# 프론트엔드
+# 개별 이미지 빌드
+docker build -f Dockerfile.backend -t mdm-backend .
 docker build -f frontend2/Dockerfile -t mdm-frontend ./frontend2
 ```
 
-### Kubernetes 배포
+## 🔧 유지보수
+
+### 로그 확인
 
 ```bash
-# 네임스페이스 생성
-kubectl create namespace mdm
+# 전체 로그
+docker-compose logs -f
+
+# 특정 서비스 로그
+docker-compose logs -f backend
+docker-compose logs -f frontend
+```
+
+### 데이터 백업
+
+```bash
+# MongoDB 백업
+docker exec mdm-mongodb mongodump --db mdm --out /backup
+
+# Elasticsearch 백업 (스냅샷)
+curl -X PUT "localhost:9200/_snapshot/backup_repo" -H 'Content-Type: application/json' -d '{
+  "type": "fs",
+  "settings": {"location": "/backup/elasticsearch"}
+}'
+```
 
 # 배포
 kubectl apply -f k8s/
